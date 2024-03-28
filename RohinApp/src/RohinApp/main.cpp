@@ -140,7 +140,7 @@ const int64 DYNARRAY_COUNT    = -1;
 const int64 DYNARRAY_DATA     =  0;
 constexpr uint64 HEADER_SIZE = 4*sizeof(int64);
 
-void print_arr(uint32* uint32_arr) {
+void print_arr_real32(uint32* uint32_arr) {
     uint64 arr_count = GetArrayCount(uint32_arr);
     uint64 arr_capacity = GetArrayCapacity(uint32_arr);
     printf("array: [%llu/%llu]\n", arr_count, arr_capacity);
@@ -162,7 +162,7 @@ struct data_t {
     uint8 v3;
     uint64 v4;
 };
-void print_arr(data_t* arr) {
+void print_arr_real32(data_t* arr) {
     uint64 arr_count = GetArrayCount(arr);
     uint64 arr_capacity = GetArrayCapacity(arr);
     printf("array: [%llu/%llu]\n", arr_count, arr_capacity);
@@ -192,46 +192,46 @@ int main(int argc, char** argv) {
     ArrayReserve(uint32_arr, 20);
 
     // try accessing now!
-    print_arr(uint32_arr);
+    print_arr_real32(uint32_arr);
 
     // add a new element
     ArrayPush(uint32_arr, 5);
     ArrayPush(uint32_arr, 1);
     ArrayPush(uint32_arr, 3);
 
-    print_arr(uint32_arr);
+    print_arr_real32(uint32_arr);
 
     ArrayPush(uint32_arr, 2);
     ArrayPush(uint32_arr, 7);
 
-    print_arr(uint32_arr);
+    print_arr_real32(uint32_arr);
 
     ArrayResize(uint32_arr, 2);
 
-    print_arr(uint32_arr);
+    print_arr_real32(uint32_arr);
 
     ArrayPush(uint32_arr, 10);
     ArrayPush(uint32_arr, 1);
 
-    print_arr(uint32_arr);
+    print_arr_real32(uint32_arr);
 
     ArrayResize(uint32_arr, 5);
 
-    print_arr(uint32_arr);
+    print_arr_real32(uint32_arr);
 
     ArrayPush(uint32_arr, 6);
     ArrayPush(uint32_arr, 6);
     ArrayPush(uint32_arr, 6);
 
-    print_arr(uint32_arr);
+    print_arr_real32(uint32_arr);
 
     for (uint32 n = 0; n < 20; n++) {
         ArrayPush(uint32_arr, 100);
-        print_arr(uint32_arr);
+        print_arr_real32(uint32_arr);
     }
 
     ArrayClear(uint32_arr);
-    print_arr(uint32_arr);
+    print_arr_real32(uint32_arr);
 
     // create a darray of a complex struct
     printf("sizeof(data_t) = %llu\n", sizeof(data_t));
@@ -239,22 +239,147 @@ int main(int argc, char** argv) {
     data_t* data_arr = CreateArray(&arena, data_t, 5);
     ArrayReserve(uint32_arr, 10);
 
-    print_arr(data_arr);
+    print_arr_real32(data_arr);
 
     data_t d { 1, 2, 3, 4 };
     ArrayPush(data_arr, d);
     data_t d2 { 4, 3, 2, 1 };
     ArrayPush(data_arr, d2);
 
-    print_arr(data_arr);
+    print_arr_real32(data_arr);
 
     data_t* end = ArrayPeek(data_arr);
-    print_arr(data_arr);
+    print_arr_real32(data_arr);
     end->v1 = 10.0f;
-    print_arr(data_arr);
+    print_arr_real32(data_arr);
 
     free(data);
     system("pause");
+    return 0;
+}
+
+#elif TEST == 3
+#include <Engine/Memory/Memory.h>
+#include <Engine/Memory/Memory_Arena.h>
+#include <Engine/Core/Logger.h>
+#include <Engine/Platform/Platform.h>
+#include <Engine/Core/String.h>
+#include <Engine/Core/Timing.h>
+
+#include <Engine/Memory/Sorting.h>
+
+#include <stdio.h>
+
+int32 partition_real32(real32* A, int32 lo, int32 hi) {
+    real32 pivot = A[hi];
+
+    // tmp pivot index
+    int32 i = lo - 1;
+    for (int32 j = lo; j < hi; j++) {
+        if (A[j] <= pivot) {
+            // move tmp pivot index
+            i++;
+            // swap current element with element at tmp pivot index
+
+            real32 tmp    = A[i];
+            A[i] = A[j];
+            A[j]  = tmp;
+        }
+    }
+
+    i++;
+    real32 tmp    = A[i];
+    A[i] = A[hi];
+    A[hi]  = tmp;
+
+    return i;
+}
+
+void print_arr_real32(char* msg, real32* data, int32 N) {
+    printf(msg);
+    for (int32 n = 0; n < N; n++) {
+        printf("%2.0f, ", data[n]);
+    }
+    printf("\n");
+}
+char space_buff[] = "                                                           ";
+void quicksort_in_place_real32(real32* A, int32 lo, int32 hi) {
+    if (lo >= hi || lo < 0) return;
+    if (hi - lo == 1) { // two element array
+        if (A[lo] > A[hi]) {
+            // swap them
+            real32 tmp        = A[hi];
+            A[hi] = A[lo];
+            A[lo]  = tmp;
+        }
+        return;
+    }
+    int32 p = partition_real32(A, lo, hi);
+    quicksort_in_place_real32(A, lo, p - 1);
+    quicksort_in_place_real32(A, p+1, hi);
+}
+
+bool32 cmp_less_than(uint8* a, uint8* b) {
+    return (*((real32*)a) <= *((real32*)b));
+}
+
+void swap_func(uint8* a, uint8* b) {
+    real32 tmp = *((real32*)a);
+    *((real32*)a) = *((real32*)b);
+    *((real32*)b)  = tmp;
+}
+
+struct bloon {
+    uint32 type;
+    uint32 health;
+    real32 position;
+    uint16 a;
+    uint16 b;
+};
+
+bool32 cmp_bloon(uint8* a, uint8* b) {
+    return ((bloon*)a)->position <= ((bloon*)b)->position;
+}
+
+void print_arr_bloon(char* msg, bloon* data, int32 N) {
+    printf(msg);
+    for (int32 n = 0; n < N; n++) {
+        printf("%2.0f, ", data[n].position);
+    }
+    printf("\n");
+}
+
+int main() {
+//int WinMain(void* instance, void* prev_instance, char* cmd_line, int show_cmd) {
+//int WinMain(HINSTANCE instance, HINSTANCE prev_instance, char* cmd_line, int show_cmd) {
+    InitLogging(false, LOG_LEVEL_TRACE);
+    RH_TRACE("starting...");
+
+    uint8 arena_buffer[32*1024];
+    memory_zero(arena_buffer, sizeof(arena_buffer));
+    memory_arena arena;
+    CreateArena(&arena, sizeof(arena_buffer), arena_buffer);
+
+    RH_INFO("Learning how to implement quicksort");
+
+    real32 data[] = {10, 80, 30, 90, 40, 50, 70};
+    print_arr_real32("Unsorted: ", data, 7);
+    //quicksort_in_place_real32(data, 0, 6);
+    real32 tmp;
+    quicksort_in_place((uint8*)data, (uint8*)&tmp, sizeof(real32), 0, 6, &cmp_less_than);
+    print_arr_real32("Sorted:   ", data, 7);
+
+    bloon* bloons = PushArray(&arena, bloon, 12);
+    for (uint32 n = 0; n < 12; n++) {
+        bloons[n].type = 12;
+        bloons[n].position = 12.0f - (real32)n;
+    }
+
+    print_arr_bloon("Unsorted: ", bloons, 12);
+    bloon tmp_bloon;
+    quicksort_in_place((uint8*)bloons, (uint8*)&tmp_bloon, sizeof(bloon), 0, 11, &cmp_bloon);
+    print_arr_bloon("Sorted:   ", bloons, 12);
+
     return 0;
 }
 
