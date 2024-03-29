@@ -6,6 +6,7 @@
 #include <Engine/Core/Event.h>
 #include <Engine/Core/String.h>
 #include <Engine/Memory/Memory.h>
+#include <Engine/Memory/Sorting.h>
 #include <Engine/Memory/Memory_Arena.h>
 #include <Engine/Renderer/Renderer.h>
 #include <Engine/Renderer/Render_Types.h>
@@ -74,8 +75,28 @@ static const laml::Vec3 bloon_color[Bloon_Type::NUM_BLOON_TYPES] = {
     laml::Vec3(0.8f, 0.5f, 0.1f),   // CERAMIC
 };
 
+static const real32 bloon_size[Bloon_Type::NUM_BLOON_TYPES] = {
+    1.0f,
+    0.6f, // RED
+    0.7f, // BLUE
+    0.8f, // GREEN
+    0.9f, // YELLOW
+    1.0f, // PINK
+    0.4f, // BLACK
+    0.4f, // WHITE
+    1.0f, // PURPLE
+    0.9f, // LEAD
+    1.0f, // ZEBRA
+    1.0f, // RAINBOW
+    1.0f, // CERAMIC
+};
+
 // bloon tags
-#define TAG_DEAD 0x8000
+#define TAG_DEAD                    0x8000
+#define TAG_SPAWN_BLACK_AND_WHITE   0x4000
+#define TAG_CAMO                    0x2000
+#define TAG_REGROW                  0x1000
+#define TAG_FORTIFIED               0x0800
 
 struct bloon {
     real32 speed;
@@ -114,7 +135,7 @@ bloon* spawn_bloon(bloon* bloon_arr, real32 spawn_position, Bloon_Type type) {
         } break;
         case Bloon_Type::GREEN: {
             new_bloon.speed = 1.8f;
-            new_bloon.rank = 2;
+            new_bloon.rank = 3;
             new_bloon.tags = 0;
             new_bloon.health = 1;
             new_bloon.child_type = Bloon_Type::BLUE;
@@ -122,7 +143,7 @@ bloon* spawn_bloon(bloon* bloon_arr, real32 spawn_position, Bloon_Type type) {
         } break;
         case Bloon_Type::YELLOW: {
             new_bloon.speed = 3.2f;
-            new_bloon.rank = 2;
+            new_bloon.rank = 4;
             new_bloon.tags = 0;
             new_bloon.health = 1;
             new_bloon.child_type = Bloon_Type::GREEN;
@@ -130,7 +151,7 @@ bloon* spawn_bloon(bloon* bloon_arr, real32 spawn_position, Bloon_Type type) {
         } break;
         case Bloon_Type::PINK: {
             new_bloon.speed = 3.5f;
-            new_bloon.rank = 2;
+            new_bloon.rank = 5;
             new_bloon.tags = 0;
             new_bloon.health = 1;
             new_bloon.child_type = Bloon_Type::YELLOW;
@@ -138,7 +159,7 @@ bloon* spawn_bloon(bloon* bloon_arr, real32 spawn_position, Bloon_Type type) {
         } break;
         case Bloon_Type::BLACK: {
             new_bloon.speed = 1.8f;
-            new_bloon.rank = 2;
+            new_bloon.rank = 7;
             new_bloon.tags = 0;
             new_bloon.health = 1;
             new_bloon.child_type = Bloon_Type::PINK;
@@ -146,7 +167,7 @@ bloon* spawn_bloon(bloon* bloon_arr, real32 spawn_position, Bloon_Type type) {
         } break;
         case Bloon_Type::WHITE: {
             new_bloon.speed = 2.0f;
-            new_bloon.rank = 2;
+            new_bloon.rank = 7;
             new_bloon.tags = 0;
             new_bloon.health = 1;
             new_bloon.child_type = Bloon_Type::PINK;
@@ -154,7 +175,7 @@ bloon* spawn_bloon(bloon* bloon_arr, real32 spawn_position, Bloon_Type type) {
         } break;
         case Bloon_Type::PURPLE: {
             new_bloon.speed = 3.0f;
-            new_bloon.rank = 2;
+            new_bloon.rank = 62;
             new_bloon.tags = 0;
             new_bloon.health = 1;
             new_bloon.child_type = Bloon_Type::PINK;
@@ -162,7 +183,7 @@ bloon* spawn_bloon(bloon* bloon_arr, real32 spawn_position, Bloon_Type type) {
         } break;
         case Bloon_Type::LEAD: {
             new_bloon.speed = 1.0f;
-            new_bloon.rank = 2;
+            new_bloon.rank = 10;
             new_bloon.tags = 0;
             new_bloon.health = 1;
             new_bloon.child_type = Bloon_Type::BLACK;
@@ -170,16 +191,15 @@ bloon* spawn_bloon(bloon* bloon_arr, real32 spawn_position, Bloon_Type type) {
         } break;
         case Bloon_Type::ZEBRA: {
             new_bloon.speed = 1.8f;
-            new_bloon.rank = 2;
-            new_bloon.tags = 0;
+            new_bloon.rank = 8;
+            new_bloon.tags = TAG_SPAWN_BLACK_AND_WHITE;
             new_bloon.health = 1;
-            //new_bloon.child_type = Bloon_Type::WHITE_AND_BLACK;
-            new_bloon.child_type = Bloon_Type::WHITE;
-            new_bloon.num_children = 2;
+            new_bloon.child_type = Bloon_Type::BLACK;
+            new_bloon.num_children = 1;
         } break;
         case Bloon_Type::RAINBOW: {
             new_bloon.speed = 2.2f;
-            new_bloon.rank = 2;
+            new_bloon.rank = 9;
             new_bloon.tags = 0;
             new_bloon.health = 1;
             new_bloon.child_type = Bloon_Type::ZEBRA;
@@ -187,9 +207,9 @@ bloon* spawn_bloon(bloon* bloon_arr, real32 spawn_position, Bloon_Type type) {
         } break;
         case Bloon_Type::CERAMIC: {
             new_bloon.speed = 2.5f;
-            new_bloon.rank = 2;
+            new_bloon.rank = 11;
             new_bloon.tags = 0;
-            new_bloon.health = 1;
+            new_bloon.health = 10;
             new_bloon.child_type = Bloon_Type::RAINBOW;
             new_bloon.num_children = 2;
         } break;
@@ -200,6 +220,20 @@ bloon* spawn_bloon(bloon* bloon_arr, real32 spawn_position, Bloon_Type type) {
     return ArrayPeek(bloon_arr);
 }
 
+enum targeting_mode {
+    TARGET_CLOSE  = 0,
+    TARGET_FAR,
+    TARGET_FIRST,
+    TARGET_LAST,
+    TARGET_STRONG
+};
+struct tower {
+    laml::Vec3 position;
+    targeting_mode mode;
+    real32 range;
+    real32 shoot_cd;
+};
+
 struct game_state {
     memory_arena arena;
 
@@ -208,6 +242,7 @@ struct game_state {
 
     resource_static_mesh bloon_mesh;
     resource_static_mesh tower_mesh;
+    resource_static_mesh range_mesh;
 
     bool32 debug_mode;
     real32 sun_yp[2];
@@ -222,6 +257,8 @@ struct game_state {
     uint64 bloon_arena_size;
     bloon* bloons; // dynarray
 
+    tower* towers; // dynarray
+
     bloon_path path;
 
     real32 time_since_last_spawn;
@@ -230,13 +267,14 @@ struct game_state {
     uint32 num_spawned;
 
     real32 kill_cd;
+    real32 collapse_cd;
 };
 
 bool32 controller_key_press(uint16 code, void* sender, void* listener, event_context context);
 bool32 controller_key_release(uint16 code, void* sender, void* listener, event_context context);
 
 static const real32 height = 0.5f;
-static laml::Vec3 path[] = {
+static laml::Vec3 path_data[] = {
     laml::Vec3(-13.358f,   height, -2.1896f),
     laml::Vec3( -7.1466f,  height, -2.0415f),
     laml::Vec3( -6.1836f,  height, -2.7964f),
@@ -292,6 +330,7 @@ void init_game(game_state* state, game_memory* memory) {
     resource_load_static_mesh("Data/Models/bloon.mesh", &state->bloon_mesh);
     state->bloon_mesh.materials[0].RoughnessFactor = 0.0f;
     resource_load_static_mesh("Data/Models/tower.mesh", &state->tower_mesh);
+    resource_load_static_mesh("Data/Models/range.mesh", &state->range_mesh);
 
     // allocate memory for bloons
     uint64 INITIAL_RESERVE = 50'000;
@@ -299,6 +338,7 @@ void init_game(game_state* state, game_memory* memory) {
     uint8* bloon_arena_data = (uint8*)PushSize_(&state->arena, state->bloon_arena_size);
     CreateArena(&state->bloon_arena, state->bloon_arena_size, bloon_arena_data);
     state->bloons = CreateArray(&state->bloon_arena, bloon, INITIAL_RESERVE-2);
+    state->towers = CreateArray(&state->arena, tower, 10);
 
     create_scene(&state->scene, "basic_scene", &state->arena);
     ArrayReserve(state->scene.static_entities, INITIAL_RESERVE);
@@ -329,13 +369,13 @@ void init_game(game_state* state, game_memory* memory) {
     state->game_speed = 3.0f;
 
     bloon_path bp;
-    bp.nodes = path;
-    bp.num_nodes = sizeof(path)/sizeof(path[0]);
+    bp.nodes = path_data;
+    bp.num_nodes = sizeof(path_data)/sizeof(path_data[0]);
     bp.path_distance = PushArray(&state->arena, real32, bp.num_nodes);
     bp.path_distance[0] = 0.0f;
     bp.total_length = 0.0f;
     for (uint32 n = 1; n < bp.num_nodes; n++) {
-        real32 segment_length = laml::length(path[n] - path[n - 1]);
+        real32 segment_length = laml::length(path_data[n] - path_data[n - 1]);
         bp.path_distance[n] = bp.total_length + segment_length;
         bp.total_length += segment_length;
 
@@ -352,9 +392,21 @@ void init_game(game_state* state, game_memory* memory) {
     entity_static* floor = create_static_entity(&state->scene, "floor", mesh);
     floor->color = laml::Vec3(1.0f);
 
-    entity_static* ent = create_static_entity(&state->scene, "tower", &state->tower_mesh);
-    ent->position = laml::Vec3(-4.5f, 0.0f, -4.5f);
-    ent->color = laml::Vec3(1.0f);
+    tower new_tower;
+    new_tower.position = laml::Vec3(-4.5f, 0.0f, -4.5f);
+    new_tower.range = 2.5f;
+    new_tower.mode = TARGET_FIRST;
+    ArrayPushValue(state->towers, new_tower);
+
+    new_tower.position = laml::Vec3(-2.2f, 0.0f, 0.0f);
+    new_tower.range = 2.5f;
+    new_tower.mode = TARGET_FIRST;
+    ArrayPushValue(state->towers, new_tower);
+
+    new_tower.position = laml::Vec3(8.0f, 0.0f, 8.0f);
+    new_tower.range = 25.0f;
+    new_tower.mode = TARGET_STRONG;
+    ArrayPushValue(state->towers, new_tower);
 
     RH_INFO("Scene created. %d Static entities. %d Skinned entities.",
             GetArrayCount(state->scene.static_entities),
@@ -363,9 +415,10 @@ void init_game(game_state* state, game_memory* memory) {
     RH_INFO("Game initialized");
 
     state->kill_cd = 0.0f;
-    spawn_bloon(state->bloons, 0, Bloon_Type::CERAMIC);
+    //spawn_bloon(state->bloons, 0, Bloon_Type::CERAMIC); 
 
     state->paused = true;
+    state->collapse_cd = 0.0f;
 }
 
 // Silly way right now! basically recursively spawn/damage bloons
@@ -378,15 +431,78 @@ void damage_bloon(bloon* bloons_arr, bloon* b, int8 dmg) {
 
         RH_INFO("%s bloon popped!", bloon_names[(int8)b->type]);
         if (b->child_type != Bloon_Type::NONE) {
-            RH_INFO("Spawning %d %s bloons!", b->num_children, bloon_names[(int8)b->child_type]);
-            for (int8 c = 0; c < b->num_children; c++) {
-                bloon* child = spawn_bloon(bloons_arr, b->position - 0.1f*c, b->child_type);
+            if (b->tags & TAG_SPAWN_BLACK_AND_WHITE) {
+                RH_INFO("Spawning %d Black and %d White bloons!", b->num_children, b->num_children);
+                bloon* child = spawn_bloon(bloons_arr, b->position, Bloon_Type::BLACK);
                 damage_bloon(bloons_arr, child, overkill);
+
+                child = spawn_bloon(bloons_arr, b->position - 0.1f, Bloon_Type::WHITE);
+                damage_bloon(bloons_arr, child, overkill);
+            } else {
+                RH_INFO("Spawning %d %s bloons!", b->num_children, bloon_names[(int8)b->child_type]);
+                for (int8 c = 0; c < b->num_children; c++) {
+                    bloon* child = spawn_bloon(bloons_arr, b->position - 0.1f*c, b->child_type);
+                    damage_bloon(bloons_arr, child, overkill);
+                }
             }
         }
 
         b->tags |= TAG_DEAD;
     }
+}
+
+bool32 bloon_cmp(uint8* a, uint8* b) {
+    bloon* ba = ((bloon*)a);
+    if (ba->tags & TAG_DEAD) ba->position = 1e6;
+    bloon* bb = ((bloon*)b);
+    if (bb->tags & TAG_DEAD) bb->position = 1e6;
+
+    return ba->position <= bb->position;
+}
+
+/* targeting functions */
+bool32 tgt_find_first(uint8* a, uint8* b) { // sort by position, decending
+    bloon* ba = ((bloon*)a);
+    if (ba->tags & TAG_DEAD) ba->position = 0;
+    bloon* bb = ((bloon*)b);
+    if (bb->tags & TAG_DEAD) bb->position = 0;
+
+    return ba->position > bb->position;
+}
+bool32 tgt_find_last(uint8* a, uint8* b) { // sort by position, ascending
+    bloon* ba = ((bloon*)a);
+    if (ba->tags & TAG_DEAD) ba->position = 1e6;
+    bloon* bb = ((bloon*)b);
+    if (bb->tags & TAG_DEAD) bb->position = 1e6;
+
+    return ba->position <= bb->position;
+}
+bool32 tgt_find_strong(uint8* a, uint8* b) { // sort by rank, decending
+    bloon* ba = ((bloon*)a);
+    if (ba->tags & TAG_DEAD) ba->rank = 0;
+    bloon* bb = ((bloon*)b);
+    if (bb->tags & TAG_DEAD) bb->rank = 0;
+
+    return ba->rank > bb->rank;
+}
+
+laml::Vec3 get_position_on_path(real32 pos, const bloon_path* path) {
+    // really bad lookup of the entire path to find the two relevant
+    // nodes. should cache these or something.
+    uint32 idx = 0;
+    real32 f = 0.0f;
+    for (uint32 i = 0; i < (path->num_nodes - 1); i++) {
+        real32 left  = path->path_distance[i];
+        real32 right = path->path_distance[i+1];
+
+        if (left <= pos && pos < right) {
+            idx = i;
+            f = (pos - left) / (right - left);
+            break;
+        }
+    }
+
+    return (path->nodes[idx] * (1.0f-f)) + (path->nodes[idx+1] * f);
 }
 
 GAME_API GAME_UPDATE_FUNC(GameUpdate) {
@@ -406,8 +522,35 @@ GAME_API GAME_UPDATE_FUNC(GameUpdate) {
     state->level_time += delta_time;
     state->time_since_last_spawn += delta_time;
     state->kill_cd += delta_time;
+    state->collapse_cd += delta_time;
+
+    // collapse the array of bloons, getting rid of dead bloons and sorting the live ones
+    if (state->collapse_cd >= 2.5f) {
+        state->collapse_cd -= 2.5f;
+
+        uint32 num_bloons = (uint32)GetArrayCount(state->bloons);
+        if (num_bloons > 1) {
+            time_point pre_sort = start_timer();
+            bloon tmp_bloon;
+            quicksort_in_place((uint8*)(state->bloons), (uint8*)(&tmp_bloon), sizeof(bloon), 0, num_bloons-1, &bloon_cmp);
+            real64 sort_time_us = measure_elapsed_time(pre_sort) * 1000000.0f;
+
+            uint32 num_alive = 0;
+            for (uint32 n = 0; n < num_bloons; n++) {
+                bloon* b = &state->bloons[n];
+                if (b->tags & TAG_DEAD) continue;
+
+                num_alive++;
+            }
+
+            RH_WARN("%.3f us spent sorting. %u/%u bloons alive", sort_time_us, num_alive, num_bloons);
+
+            ArrayResize(state->bloons, num_alive);
+        }
+    }
 
     // check if bloon needs to be spawned
+    // todo: have this scheduled based on level/round
     while ((state->num_spawned < state->num_bloons_to_spawn) && (state->time_since_last_spawn > state->spawn_rate)) {
         // spawn a balloon
         state->num_spawned++;
@@ -419,8 +562,8 @@ GAME_API GAME_UPDATE_FUNC(GameUpdate) {
         } else {
             type = Bloon_Type::RED;
         }
-        //RH_INFO("Spawning %s bloon %u/%u!", bloon_names[(int8)type], state->num_spawned, state->num_bloons_to_spawn);
-        //spawn_bloon(state->bloons, 0.0f, type);
+        RH_INFO("Spawning %s bloon %u/%u!", bloon_names[(int8)type], state->num_spawned, state->num_bloons_to_spawn);
+        spawn_bloon(state->bloons, 0.0f, type);
     }
 
     // update all bloons
@@ -428,43 +571,156 @@ GAME_API GAME_UPDATE_FUNC(GameUpdate) {
     // 1. get total count of bloons. This will include bloons marked as popped.
     //    We cache this now, so even if we spawn new ones, they would be after
     //    all the existing bloons, so we wouldn't update them just yet anyway
+    // Note: In between 'collapses' this will include dead bloons, but not that many now
     uint32 num_bloons = (uint32)GetArrayCount(state->bloons);
-    ((uint64*)state->scene.static_entities)[-1] = 2; // set count to 2 (just the floor + tower!)
+    ((uint64*)state->scene.static_entities)[-1] = 1; // set count to 1 (just the floor!)
 
-    // kill the strongest bloon
-    uint32 strongest_idx  = 0;
-    int8   strongest_type = 0;
-    real32 strongest_pos  = 0.0f;
-    for (uint32 n = 0; n < num_bloons; n++) {
-        bloon* b = &state->bloons[n];
-        if (b->tags & TAG_DEAD) continue;
+    // 2. update all towers
+    //    dumb method here! todo: make better
+    //    for every tower, find the distance to every bloon
+    //    then only choose amongst the ones that are <range away
+    //    then sort those by targeting_mode
+    uint32 num_towers = (uint32)GetArrayCount(state->towers);
+    for (uint32 n = 0; n < num_towers; n++) {
+        tower* t = &state->towers[n];
 
-        if ((int8)b->type >= strongest_type && b->position > strongest_pos) {
-            strongest_type = (int8)b->type;
-            strongest_idx = n;
-            strongest_pos = b->position;
+        entity_static* ent = create_static_entity(&state->scene, "-", &state->tower_mesh);
+        ent->position = t->position;
+
+        if (state->debug_mode && t->range < 20.0f) {
+            entity_static* range_ent = create_static_entity(&state->scene, "range", &state->range_mesh);
+            range_ent->position = t->position;
+            range_ent->scale = laml::Vec3(t->range);
+            range_ent->color = laml::Vec3(0.2f, 1.0f, 0.2f);
+        }
+
+        t->shoot_cd += delta_time;
+        if (t->shoot_cd > 1.0f) {
+
+            memory_index save = state->arena.Used; // save state
+            uint32* bloons_in_range_idx = CreateArray(&state->arena, uint32, 100);
+            for (uint32 m = 0; m < num_bloons; m++) {
+                bloon* b = &state->bloons[m];
+
+                laml::Vec3 pos = get_position_on_path(b->position, &state->path);
+                real32 dist = laml::length(pos - t->position);
+                if (dist < t->range) {
+                    ArrayPushValue(bloons_in_range_idx, m);
+                }
+            }
+
+            uint32 num_in_range = (uint32)GetArrayCount(bloons_in_range_idx);
+            if (num_in_range == 1) {
+                RH_INFO("Shoot.");
+                // target that one
+                bloon* tgt = &state->bloons[bloons_in_range_idx[0]];
+
+                // before we damage a bloon (which might cause allocs, we reset the memory arena
+                state->arena.Used = save;
+                damage_bloon(state->bloons, tgt, 1); // todo: tower should have its own damage stat
+                t->shoot_cd = 0.0f;
+            } else if (num_in_range > 1) {
+                RH_INFO("Shoot.");
+                // sort by targeting_mode criteria
+                // DOESN'T WORK! the bloons_in_range array we create before is filled with copies, with no way
+                //               to tie back to the originals.
+                // ALSO!         We don't need to sort the whole array... just need the highest
+                uint32 tgt_idx = 0;
+                switch (t->mode) {
+                    case TARGET_CLOSE: {
+                        // bloons* array does not store distance from tower, so this cannot be done like the others
+                        //quicksort_in_place((uint8*)bloons_in_range, (uint8*)(&tmp_bln), sizeof(bloon), 0, num_in_range - 1, &tgt_find_close);
+
+                        real32 closest_dist = 1e6;
+                        for (uint32 k = 0; k < num_in_range; k++) {
+                            bloon* test = &state->bloons[bloons_in_range_idx[k]];
+                            laml::Vec3 pos = get_position_on_path(test->position, &state->path);
+                            real32 dist = laml::length(pos - t->position);
+                            if (dist < closest_dist) {
+                                closest_dist = dist;
+                                tgt_idx = k;
+                            }
+                        }
+                    } break;
+                    case TARGET_FAR: {
+                        // bloons* array does not store distance from tower, so this cannot be done like the others
+                        //quicksort_in_place((uint8*)bloons_in_range, (uint8*)(&tmp_bln), sizeof(bloon), 0, num_in_range - 1, &tgt_find_far);
+
+                        real32 farthest_dist = 0.0f;
+                        for (uint32 k = 0; k < num_in_range; k++) {
+                            bloon* test = &state->bloons[bloons_in_range_idx[k]];
+                            laml::Vec3 pos = get_position_on_path(test->position, &state->path);
+                            real32 dist = laml::length(pos - t->position);
+                            if (dist > farthest_dist) {
+                                farthest_dist = dist;
+                                tgt_idx = k;
+                            }
+                        }
+                    } break;
+                    case TARGET_FIRST: {
+                        //quicksort_in_place((uint8*)bloons_in_range, (uint8*)(&tmp_bln), sizeof(bloon), 0, num_in_range - 1, &tgt_find_first);
+
+                        real32 farthest_pos = 0.0f;
+                        for (uint32 k = 0; k < num_in_range; k++) {
+                            bloon* test = &state->bloons[bloons_in_range_idx[k]];
+                            if (test->position > farthest_pos) {
+                                farthest_pos = test->position;
+                                tgt_idx = k;
+                            }
+                        }
+                    } break;
+                    case TARGET_LAST: {
+                        //quicksort_in_place((uint8*)bloons_in_range, (uint8*)(&tmp_bln), sizeof(bloon), 0, num_in_range - 1, &tgt_find_last);
+
+                        real32 least_pos = 1e6;
+                        for (uint32 k = 0; k < num_in_range; k++) {
+                            bloon* test = &state->bloons[bloons_in_range_idx[k]];
+                            if (test->position < least_pos) {
+                                least_pos = test->position;
+                                tgt_idx = k;
+                            }
+                        }
+                    } break;
+                    case TARGET_STRONG: {
+                        //quicksort_in_place((uint8*)bloons_in_range, (uint8*)(&tmp_bln), sizeof(bloon), 0, num_in_range - 1, &tgt_find_strong);
+
+                        uint16 highest_rank = 0;
+                        for (uint32 k = 0; k < num_in_range; k++) {
+                            bloon* test = &state->bloons[bloons_in_range_idx[k]];
+                            if (test->rank > highest_rank) {
+                                highest_rank = test->rank;
+                                tgt_idx = k;
+                            }
+                        }
+                    } break;
+                }
+
+                // after sorting, bloon index 0 should be the best candidate
+                //bloon* tgt = &bloons_in_range[0];
+                //damage_bloon(state->bloons, tgt, 1); // todo: tower should have its own damage stat
+
+                bloon* tgt = &state->bloons[bloons_in_range_idx[tgt_idx]];
+
+                // before we damage a bloon (which might cause allocs, we reset the memory arena
+                state->arena.Used = save;
+                damage_bloon(state->bloons, tgt, 1); // todo: tower should have its own damage stat
+                t->shoot_cd = 0.0f;
+            }
         }
     }
 
+    // update bloon positions/respond to damage
     uint32 num_alive = 0;
     for (uint32 n = 0; n < num_bloons; n++) {
         bloon* b = &state->bloons[n];
         if (b->tags & TAG_DEAD) continue;
 
-        num_alive++;
-
         b->position += b->speed * delta_time;
 
-        // tmp! do 1 damage after distance of 25 to blues
-        if (b->position > 3.0f && n == strongest_idx && (int8)b->type == strongest_type && (state->kill_cd > 1.0f)) {
-            damage_bloon(state->bloons, b, 2);
-            state->kill_cd = 0.0f;
-        }
-
-        if (b->tags & TAG_DEAD) continue; // it might be dead now!
+        num_alive++;
 
         entity_static* ent = create_static_entity(&state->scene, "-", &state->bloon_mesh);
-        ent->scale = laml::Vec3(0.3f, 0.3f, 0.3f);
+        ent->scale = laml::Vec3(0.3f, 0.3f, 0.3f) * bloon_size[(int8)b->type];
         ent->color = bloon_color[(int8)b->type];
         // todo: make entities instances of meshes intead of meshes themselves
         // todo: separate mesh and material?
@@ -478,23 +734,7 @@ GAME_API GAME_UPDATE_FUNC(GameUpdate) {
             // calculate bloon total and subtract from life
             RH_WARN("%s bloon leaked!", bloon_names[(int8)b->type]);
         } else {
-            // really bad lookup of the entire path to find the two relevant
-            // nodes. should cache these or something.
-            uint32 idx = 0;
-            real32 f = 0.0f;
-            real32 pos = b->position;
-            for (uint32 i = 0; i < (state->path.num_nodes - 1); i++) {
-                real32 left  = state->path.path_distance[i];
-                real32 right = state->path.path_distance[i+1];
-
-                if (left <= pos && pos < right) {
-                    idx = i;
-                    f = (pos - left) / (right - left);
-                    break;
-                }
-            }
-
-            ent->position = (state->path.nodes[idx] * (1.0f-f)) + (state->path.nodes[idx+1] * f);
+            ent->position = get_position_on_path(b->position, &state->path);
         }
     }
 
@@ -682,7 +922,7 @@ GAME_API GAME_UPDATE_FUNC(GameUpdate) {
 GAME_API GAME_KEY_EVENT_FUNC(GameKeyEvent) {
     game_state* state = (game_state*)memory->GameStorage;
 
-    if (key_code == KEY_C) {
+    if (key_code == KEY_F1) {
         state->debug_mode = !state->debug_mode;
     } else if (key_code == KEY_P) {
         state->paused = !state->paused;

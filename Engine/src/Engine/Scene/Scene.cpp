@@ -43,6 +43,8 @@ entity_static* create_static_entity(scene_3D* scene, const char* name, resource_
     entity.orientation = laml::Quat(0.0f, 0.0f, 0.0f, 1.0f);
     entity.scale       = laml::Vec3(1.0f, 1.0f, 1.0f);
 
+    entity.color = laml::Vec3(-1.0f); // tmp
+
     ArrayPushPtr(scene->static_entities, &entity, sizeof(entity_static));
     entity_static* new_entity_ptr = ArrayPeek(scene->static_entities);
 

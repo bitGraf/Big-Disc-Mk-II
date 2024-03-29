@@ -2384,11 +2384,11 @@ void stb_replaceinplace(char *src, char *find, char *replace)
     *q = 0;
 }
 
-void stb_fixpath(char *path)
+void stb_fixpath(char *path_data)
 {
-    for (; *path; ++path)
-        if (*path == '\\')
-            *path = '/';
+    for (; *path_data; ++path_data)
+        if (*path_data == '\\')
+            *path_data = '/';
 }
 
 void stb__add_section(char *buffer, char *data, ptrdiff_t curlen, ptrdiff_t newlen)
@@ -2404,23 +2404,23 @@ void stb__add_section(char *buffer, char *data, ptrdiff_t curlen, ptrdiff_t newl
         memcpy(buffer, data, curlen);
 }
 
-char * stb_shorten_path_readable(char *path, int len)
+char * stb_shorten_path_readable(char *path_data, int len)
 {
     static char buffer[1024];
-    ptrdiff_t n = strlen(path), n1, n2, r1, r2;
+    ptrdiff_t n = strlen(path_data), n1, n2, r1, r2;
     char *s;
-    if (n <= len) return path;
-    if (len > 1024) return path;
-    s = stb_strrchr2(path, '/', '\\');
+    if (n <= len) return path_data;
+    if (len > 1024) return path_data;
+    s = stb_strrchr2(path_data, '/', '\\');
     if (s) {
-        n1 = s - path + 1;
+        n1 = s - path_data + 1;
         n2 = n - n1;
         ++s;
     }
     else {
         n1 = 0;
         n2 = n;
-        s = path;
+        s = path_data;
     }
     // now we need to reduce r1 and r2 so that they fit in len
     if (n1 < len >> 1) {
@@ -2439,17 +2439,17 @@ char * stb_shorten_path_readable(char *path, int len)
     }
     assert(r1 <= n1 && r2 <= n2);
     if (n1)
-        stb__add_section(buffer, path, n1, r1);
+        stb__add_section(buffer, path_data, n1, r1);
     stb__add_section(buffer + r1, s, n2, r2);
     buffer[len] = 0;
     return buffer;
 }
 
-static char *stb__splitpath_raw(char *buffer, char *path, int flag)
+static char *stb__splitpath_raw(char *buffer, char *path_data, int flag)
 {
-    ptrdiff_t len = 0, x, y, n = (int)strlen(path), f1, f2;
-    char *s = stb_strrchr2(path, '/', '\\');
-    char *t = strrchr(path, '.');
+    ptrdiff_t len = 0, x, y, n = (int)strlen(path_data), f1, f2;
+    char *s = stb_strrchr2(path_data, '/', '\\');
+    char *t = strrchr(path_data, '.');
     if (s && t && t < s) t = NULL;
     if (s) ++s;
 
@@ -2458,8 +2458,8 @@ static char *stb__splitpath_raw(char *buffer, char *path, int flag)
 
     if (!(flag & (STB_PATH | STB_FILE | STB_EXT))) return NULL;
 
-    f1 = s == NULL ? 0 : s - path; // start of filename
-    f2 = t == NULL ? n : t - path; // just past end of filename
+    f1 = s == NULL ? 0 : s - path_data; // start of filename
+    f2 = t == NULL ? n : t - path_data; // just past end of filename
 
     if (flag & STB_PATH) {
         x = 0; if (f1 == 0 && flag == STB_PATH) len = 2;
@@ -2470,7 +2470,7 @@ static char *stb__splitpath_raw(char *buffer, char *path, int flag)
     else {
         x = f2;
         if (flag & STB_EXT_NO_PERIOD)
-            if (path[x] == '.')
+            if (path_data[x] == '.')
                 ++x;
     }
 
@@ -2487,7 +2487,7 @@ static char *stb__splitpath_raw(char *buffer, char *path, int flag)
     }
 
     if (len) { stb_p_strcpy_s(buffer, 3, "./"); return buffer; }
-    stb_strncpy(buffer, path + (int)x, (int)(y - x));
+    stb_strncpy(buffer, path_data + (int)x, (int)(y - x));
     return buffer;
 }
 
@@ -7043,7 +7043,7 @@ void stb_cfg_write_string(stb_cfg *z, char *key, char *value)
 
 typedef struct
 {
-    char   * path;           // full path from passed-in root
+    char   * path_data;           // full path from passed-in root
     time_t   last_modified;
     int      num_files;
     int      flag;
@@ -7087,18 +7087,18 @@ extern stb_dirtree *stb_dirtree_get_with_file(char *dir, char *cache_file);
 // a mirrored copy WITHOUT bothering to rescan it (i.e. we're mirroring to
 // it WITHOUT scanning it, e.g. it's over the net), so this requires access
 // to all of the innards.
-extern void stb_dirtree_db_add_dir(stb_dirtree *active, char *path, time_t last);
+extern void stb_dirtree_db_add_dir(stb_dirtree *active, char *path_data, time_t last);
 extern void stb_dirtree_db_add_file(stb_dirtree *active, char *name, int dir, stb_int64 size, time_t last);
 extern void stb_dirtree_db_read(stb_dirtree *target, char *filename, char *dir);
 extern void stb_dirtree_db_write(stb_dirtree *target, char *filename, char *dir);
 
 #ifdef STB_DEFINE
-static void stb__dirtree_add_dir(char *path, time_t last, stb_dirtree *active)
+static void stb__dirtree_add_dir(char *path_data, time_t last, stb_dirtree *active)
 {
     stb_dirtree_dir d;
     d.last_modified = last;
     d.num_files = 0;
-    d.path = stb_strdup(path, active->string_pool);
+    d.path = stb_strdup(path_data, active->string_pool);
     stb_arr_push(active->dirs, d);
 }
 
@@ -7210,7 +7210,7 @@ static void stb__dirtree_load_db(char *filename, stb_dirtree *data, char *dir)
 FILE *hlog;
 
 static int stb__dircount, stb__dircount_mask, stb__showfile;
-static void stb__dirtree_scandir(char *path, time_t last_time, stb_dirtree *active)
+static void stb__dirtree_scandir(char *path_data, time_t last_time, stb_dirtree *active)
 {
     // this is dumb depth first; theoretically it might be faster
     // to fully traverse each directory before visiting its children,
@@ -7224,35 +7224,35 @@ static void stb__dirtree_scandir(char *path, time_t last_time, stb_dirtree *acti
     int has_slash;
     if (stb__showfile) printf("<");
 
-    has_slash = (path[0] && path[strlen(path) - 1] == '/');
+    has_slash = (path_data[0] && path_data[strlen(path_data) - 1] == '/');
 
     // @TODO: do this concatenation without using swprintf to avoid this mess:
 #if (defined(_MSC_VER) && _MSC_VER < 1400) // || (defined(__clang__))
    // confusingly, Windows Kits\10 needs to go down this path?!?
    // except now it doesn't, I don't know what changed
     if (has_slash)
-        swprintf(full_path, L"%s*", stb__from_utf8(path));
+        swprintf(full_path, L"%s*", stb__from_utf8(path_data));
     else
-        swprintf(full_path, L"%s/*", stb__from_utf8(path));
+        swprintf(full_path, L"%s/*", stb__from_utf8(path_data));
 #else
     if (has_slash)
-        swprintf((wchar_t *)full_path, (size_t)1024, L"%s*", (wchar_t *)stb__from_utf8(path));
+        swprintf((wchar_t *)full_path, (size_t)1024, L"%s*", (wchar_t *)stb__from_utf8(path_data));
     else
-        swprintf((wchar_t *)full_path, (size_t)1024, L"%s/*", (wchar_t *)stb__from_utf8(path));
+        swprintf((wchar_t *)full_path, (size_t)1024, L"%s/*", (wchar_t *)stb__from_utf8(path_data));
 #endif
 
     // it's possible this directory is already present: that means it was in the
     // cache, but its parent wasn't... in that case, we're done with it
     if (stb__showfile) printf("C[%d]", stb_arr_len(active->dirs));
     for (n = 0; n < stb_arr_len(active->dirs); ++n)
-        if (0 == stb_stricmp(active->dirs[n].path, path)) {
+        if (0 == stb_stricmp(active->dirs[n].path, path_data)) {
             if (stb__showfile) printf("D");
             return;
         }
     if (stb__showfile) printf("E");
 
     // otherwise, we need to add it
-    stb__dirtree_add_dir(path, last_time, active);
+    stb__dirtree_add_dir(path_data, last_time, active);
     n = stb_arr_lastn(active->dirs);
 
     if (stb__showfile) printf("[");
@@ -7266,9 +7266,9 @@ static void stb__dirtree_scandir(char *path, time_t last_time, stb_dirtree *acti
                     char *temp = stb__to_utf8((stb__wchar *)c_file.name);
 
                     if (has_slash)
-                        stb_p_sprintf(new_path stb_p_size(sizeof(full_path)), "%s%s", path, temp);
+                        stb_p_sprintf(new_path stb_p_size(sizeof(full_path)), "%s%s", path_data, temp);
                     else
-                        stb_p_sprintf(new_path stb_p_size(sizeof(full_path)), "%s/%s", path, temp);
+                        stb_p_sprintf(new_path stb_p_size(sizeof(full_path)), "%s/%s", path_data, temp);
 
                     if (stb__dircount_mask) {
                         ++stb__dircount;
@@ -7498,9 +7498,9 @@ void stb_dirtree_free(stb_dirtree *d)
     free(d);
 }
 
-void stb_dirtree_db_add_dir(stb_dirtree *active, char *path, time_t last)
+void stb_dirtree_db_add_dir(stb_dirtree *active, char *path_data, time_t last)
 {
-    stb__dirtree_add_dir(path, last, active);
+    stb__dirtree_add_dir(path_data, last, active);
 }
 
 void stb_dirtree_db_add_file(stb_dirtree *active, char *name, int dir, stb_int64 size, time_t last)
@@ -10224,7 +10224,7 @@ extern stb_info_struct stb_introspect_output[];
 //
 
 STB_EXTERN void stb_introspect_precompiled(stb_info_struct *compiled);
-STB_EXTERN void stb__introspect(char *path, char *file);
+STB_EXTERN void stb__introspect(char *path_data, char *file);
 
 #define stb_introspect_ship()            stb__introspect(NULL, NULL, stb__introspect_output)
 
@@ -10256,16 +10256,16 @@ void stb_introspect_precompiled(stb_info_struct *compiled)
 }
 
 
-static void stb__introspect_filename(char *buffer, char *path)
+static void stb__introspect_filename(char *buffer, char *path_data)
 {
 #if STB_INTROSPECT_CPP
-    stb_p_sprintf(buffer stb_p_size(9999), "%s/stb_introspect.cpp", path);
+    stb_p_sprintf(buffer stb_p_size(9999), "%s/stb_introspect.cpp", path_data);
 #else
-    stb_p_sprintf(buffer stb_p_size(9999), "%s/stb_introspect.c", path);
+    stb_p_sprintf(buffer stb_p_size(9999), "%s/stb_introspect.c", path_data);
 #endif
 }
 
-static void stb__introspect_compute(char *path, char *file)
+static void stb__introspect_compute(char *path_data, char *file)
 {
     int i;
     char ** include_list = NULL;
@@ -10299,7 +10299,7 @@ static stb_info_struct *stb__introspect_info;
 
 #endif
 
-void stb__introspect(char *path, char *file, stb_info_struct *compiled)
+void stb__introspect(char *path_data, char *file, stb_info_struct *compiled)
 {
     static int first = 1;
     if (!first) return;
@@ -10308,19 +10308,19 @@ void stb__introspect(char *path, char *file, stb_info_struct *compiled)
     stb__introspect_info = compiled;
 
 #ifndef STB_SHIP
-    if (path || file) {
+    if (path_data || file) {
         int bail_flag = compiled && compiled[0].structname == (void *)1;
         int needs_building = bail_flag;
         struct stb__stat st;
         char buffer[1024], buffer2[1024];
-        if (!path) {
+        if (!path_data) {
             stb_splitpath(buffer, file, STB_PATH);
-            path = buffer;
+            path_data = buffer;
         }
         // bail if the source path doesn't exist
-        if (!stb_fexists(path)) return;
+        if (!stb_fexists(path_data)) return;
 
-        stb__introspect_filename(buffer2, path);
+        stb__introspect_filename(buffer2, path_data);
 
         // get source/include files timestamps, compare to output-file timestamp;
         // if mismatched, regenerate
@@ -10333,9 +10333,9 @@ void stb__introspect(char *path, char *file, stb_info_struct *compiled)
             // if needs_building is already true, we don't need to do this test,
             // but we still need these arrays, so go ahead and get them
             char **all[3];
-            all[0] = stb_readdir_files_mask(path, "*.h");
-            all[1] = stb_readdir_files_mask(path, "*.c");
-            all[2] = stb_readdir_files_mask(path, "*.cpp");
+            all[0] = stb_readdir_files_mask(path_data, "*.h");
+            all[1] = stb_readdir_files_mask(path_data, "*.c");
+            all[2] = stb_readdir_files_mask(path_data, "*.cpp");
             int i, j;
             if (needs_building) {
                 for (j = 0; j < 3; ++j) {
@@ -10385,7 +10385,7 @@ void stb__introspect(char *path, char *file, stb_info_struct *compiled)
     }
 
     if (needs_building) {
-        stb__introspect_compute(path, buffer2);
+        stb__introspect_compute(path_data, buffer2);
     }
 }
    }
@@ -13009,9 +13009,9 @@ int cas64_mp(void * dest, void * xcmp, void * xxchg) {
         STB_EXTERN void stb_source_path(char *str);
 #ifdef STB_DEFINE
         char *stb__source_path;
-        void stb_source_path(char *path)
+        void stb_source_path(char *path_data)
         {
-            stb__source_path = path;
+            stb__source_path = path_data;
         }
 
         char *stb__get_sourcefile_path(char *file)
