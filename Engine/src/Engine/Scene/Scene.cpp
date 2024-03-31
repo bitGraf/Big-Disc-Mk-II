@@ -45,7 +45,7 @@ entity_static* create_static_entity(scene_3D* scene, const char* name, resource_
 
     entity.color = laml::Vec3(-1.0f); // tmp
 
-    ArrayPushPtr(scene->static_entities, &entity, sizeof(entity_static));
+    scene->static_entities = (entity_static*)ArrayPushPtr(scene->static_entities, &entity, sizeof(entity_static));
     entity_static* new_entity_ptr = ArrayPeek(scene->static_entities);
 
     return new_entity_ptr;
@@ -64,7 +64,7 @@ entity_skinned* create_skinned_entity(scene_3D* scene, const char* name,
     entity.orientation = laml::Quat(0.0f, 0.0f, 0.0f, 1.0f);
     entity.scale       = laml::Vec3(1.0f, 1.0f, 1.0f);
 
-    ArrayPushPtr(scene->skinned_entities, &entity, sizeof(entity_skinned));
+    scene->skinned_entities = (entity_skinned*)ArrayPushPtr(scene->skinned_entities, &entity, sizeof(entity_skinned));
     entity_skinned* new_entity_ptr = ArrayPeek(scene->skinned_entities);
 
     return new_entity_ptr;

@@ -43,6 +43,76 @@ enum class Bloon_Type : int8 { // no more than 255 bloon types!
     NUM_BLOON_TYPES
 };
 
+// bloon tags
+#define TAG_DEAD                    0x8000
+#define TAG_SPAWN_BLACK_AND_WHITE   0x4000
+#define TAG_CAMO                    0x2000
+#define TAG_REGROW                  0x1000
+#define TAG_FORTIFIED               0x0800
+
+struct bloon {
+    real32 speed;
+    real32 position; // parameter along the path.
+
+    uint16 rank; // total strength of bloon, including children
+    uint16 tags; // bit-field of various tags like magic,camo,fortified,etc.
+
+    Bloon_Type  type;
+    Bloon_Type  child_type;   // bloon type to spawn on pop
+    int8        health;       // health of the outer layer (usually 1)
+    int8        num_children; // num of children to spawn on pop
+}; // should be 16 bytes, no padding
+
+enum targeting_mode {
+    TARGET_CLOSE  = 0,
+    TARGET_FAR,
+    TARGET_FIRST,
+    TARGET_LAST,
+    TARGET_STRONG
+};
+struct tower {
+    laml::Vec3 position;
+    targeting_mode mode;
+    real32 range;
+    real32 shoot_cd;
+};
+
+struct game_state {
+    memory_arena arena;
+
+    // basic scene
+    scene_3D scene;
+
+    resource_static_mesh bloon_mesh;
+    resource_static_mesh tower_mesh;
+    resource_static_mesh range_mesh;
+
+    bool32 debug_mode;
+    real32 sun_yp[2];
+
+
+    /////
+    memory_arena bloon_arena;
+    real32 level_time;
+    real32 game_speed;
+    bool paused;
+
+    uint64 bloon_arena_size;
+    bloon* bloons; // dynarray
+
+    tower* towers; // dynarray
+
+    bloon_path path;
+
+    real32 time_since_last_spawn;
+    real32 spawn_rate;
+    uint32 num_bloons_to_spawn;
+    uint32 num_spawned;
+
+    real32 kill_cd;
+    real32 collapse_cd;
+};
+
 static const char* bloon_names[Bloon_Type::NUM_BLOON_TYPES] = {
     "-",
     "Red",
@@ -91,27 +161,7 @@ static const real32 bloon_size[Bloon_Type::NUM_BLOON_TYPES] = {
     1.0f, // CERAMIC
 };
 
-// bloon tags
-#define TAG_DEAD                    0x8000
-#define TAG_SPAWN_BLACK_AND_WHITE   0x4000
-#define TAG_CAMO                    0x2000
-#define TAG_REGROW                  0x1000
-#define TAG_FORTIFIED               0x0800
-
-struct bloon {
-    real32 speed;
-    real32 position; // parameter along the path.
-
-    uint16 rank; // total strength of bloon, including children
-    uint16 tags; // bit-field of various tags like magic,camo,fortified,etc.
-
-    Bloon_Type  type;
-    Bloon_Type  child_type;   // bloon type to spawn on pop
-    int8        health;       // health of the outer layer (usually 1)
-    int8        num_children; // num of children to spawn on pop
-}; // should be 16 bytes, no padding
-
-bloon* spawn_bloon(bloon* bloon_arr, real32 spawn_position, Bloon_Type type) {
+bloon* spawn_bloon(game_state* state, real32 spawn_position, Bloon_Type type) {
     bloon new_bloon;
     new_bloon.position = spawn_position;
     new_bloon.type = type;
@@ -215,60 +265,12 @@ bloon* spawn_bloon(bloon* bloon_arr, real32 spawn_position, Bloon_Type type) {
         } break;
     };
 
-    ArrayPushValue(bloon_arr, new_bloon);
+    bloon* old_arr = state->bloons;
+    ArrayPushValue(state->bloons, new_bloon);
+    bloon* new_arr = state->bloons;
 
-    return ArrayPeek(bloon_arr);
+    return ArrayPeek(state->bloons);
 }
-
-enum targeting_mode {
-    TARGET_CLOSE  = 0,
-    TARGET_FAR,
-    TARGET_FIRST,
-    TARGET_LAST,
-    TARGET_STRONG
-};
-struct tower {
-    laml::Vec3 position;
-    targeting_mode mode;
-    real32 range;
-    real32 shoot_cd;
-};
-
-struct game_state {
-    memory_arena arena;
-
-    // basic scene
-    scene_3D scene;
-
-    resource_static_mesh bloon_mesh;
-    resource_static_mesh tower_mesh;
-    resource_static_mesh range_mesh;
-
-    bool32 debug_mode;
-    real32 sun_yp[2];
-
-
-    /////
-    memory_arena bloon_arena;
-    real32 level_time;
-    real32 game_speed;
-    bool paused;
-
-    uint64 bloon_arena_size;
-    bloon* bloons; // dynarray
-
-    tower* towers; // dynarray
-
-    bloon_path path;
-
-    real32 time_since_last_spawn;
-    real32 spawn_rate;
-    uint32 num_bloons_to_spawn;
-    uint32 num_spawned;
-
-    real32 kill_cd;
-    real32 collapse_cd;
-};
 
 bool32 controller_key_press(uint16 code, void* sender, void* listener, event_context context);
 bool32 controller_key_release(uint16 code, void* sender, void* listener, event_context context);
@@ -334,7 +336,7 @@ void init_game(game_state* state, game_memory* memory) {
 
     // allocate memory for bloons
     uint64 INITIAL_RESERVE = 50'000;
-    state->bloon_arena_size = INITIAL_RESERVE * sizeof(bloon);
+    state->bloon_arena_size = 4 * INITIAL_RESERVE * sizeof(bloon); // todo: the arena should not be limited, since we want the array to grow?
     uint8* bloon_arena_data = (uint8*)PushSize_(&state->arena, state->bloon_arena_size);
     CreateArena(&state->bloon_arena, state->bloon_arena_size, bloon_arena_data);
     state->bloons = CreateArray(&state->bloon_arena, bloon, INITIAL_RESERVE-2);
@@ -415,14 +417,14 @@ void init_game(game_state* state, game_memory* memory) {
     RH_INFO("Game initialized");
 
     state->kill_cd = 0.0f;
-    //spawn_bloon(state->bloons, 0, Bloon_Type::CERAMIC); 
+    //spawn_bloon(state, 0, Bloon_Type::CERAMIC); 
 
     state->paused = true;
     state->collapse_cd = 0.0f;
 }
 
 // Silly way right now! basically recursively spawn/damage bloons
-void damage_bloon(bloon* bloons_arr, bloon* b, int8 dmg) {
+void damage_bloon(game_state* state, bloon* b, int8 dmg) {
     b->health -= dmg;
 
     // check if bloon is dead
@@ -433,16 +435,16 @@ void damage_bloon(bloon* bloons_arr, bloon* b, int8 dmg) {
         if (b->child_type != Bloon_Type::NONE) {
             if (b->tags & TAG_SPAWN_BLACK_AND_WHITE) {
                 RH_INFO("Spawning %d Black and %d White bloons!", b->num_children, b->num_children);
-                bloon* child = spawn_bloon(bloons_arr, b->position, Bloon_Type::BLACK);
-                damage_bloon(bloons_arr, child, overkill);
+                bloon* child = spawn_bloon(state, b->position, Bloon_Type::BLACK);
+                damage_bloon(state, child, overkill);
 
-                child = spawn_bloon(bloons_arr, b->position - 0.1f, Bloon_Type::WHITE);
-                damage_bloon(bloons_arr, child, overkill);
+                child = spawn_bloon(state, b->position - 0.1f, Bloon_Type::WHITE);
+                damage_bloon(state, child, overkill);
             } else {
                 RH_INFO("Spawning %d %s bloons!", b->num_children, bloon_names[(int8)b->child_type]);
                 for (int8 c = 0; c < b->num_children; c++) {
-                    bloon* child = spawn_bloon(bloons_arr, b->position - 0.1f*c, b->child_type);
-                    damage_bloon(bloons_arr, child, overkill);
+                    bloon* child = spawn_bloon(state, b->position - 0.1f*c, b->child_type);
+                    damage_bloon(state, child, overkill);
                 }
             }
         }
@@ -530,6 +532,7 @@ GAME_API GAME_UPDATE_FUNC(GameUpdate) {
 
         uint32 num_bloons = (uint32)GetArrayCount(state->bloons);
         if (num_bloons > 1) {
+            RH_WARN("%Starting sort:");
             time_point pre_sort = start_timer();
             bloon tmp_bloon;
             quicksort_in_place((uint8*)(state->bloons), (uint8*)(&tmp_bloon), sizeof(bloon), 0, num_bloons-1, &bloon_cmp);
@@ -563,7 +566,7 @@ GAME_API GAME_UPDATE_FUNC(GameUpdate) {
             type = Bloon_Type::RED;
         }
         RH_INFO("Spawning %s bloon %u/%u!", bloon_names[(int8)type], state->num_spawned, state->num_bloons_to_spawn);
-        spawn_bloon(state->bloons, 0.0f, type);
+        spawn_bloon(state, 0.0f, type);
     }
 
     // update all bloons
@@ -617,7 +620,7 @@ GAME_API GAME_UPDATE_FUNC(GameUpdate) {
 
                 // before we damage a bloon (which might cause allocs, we reset the memory arena
                 state->arena.Used = save;
-                damage_bloon(state->bloons, tgt, 1); // todo: tower should have its own damage stat
+                damage_bloon(state, tgt, 1); // todo: tower should have its own damage stat
                 t->shoot_cd = 0.0f;
             } else if (num_in_range > 1) {
                 RH_INFO("Shoot.");
@@ -703,7 +706,7 @@ GAME_API GAME_UPDATE_FUNC(GameUpdate) {
 
                 // before we damage a bloon (which might cause allocs, we reset the memory arena
                 state->arena.Used = save;
-                damage_bloon(state->bloons, tgt, 1); // todo: tower should have its own damage stat
+                damage_bloon(state, tgt, 1); // todo: tower should have its own damage stat
                 t->shoot_cd = 0.0f;
             }
         }

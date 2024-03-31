@@ -144,9 +144,9 @@ bool32 start_rohin_engine(RohinApp* app) {
     engine.debug_mode = false;
     engine.engine_memory_size = Megabytes(64);
     engine.engine_memory = (uint8*)platform_alloc(engine.engine_memory_size, 0);
-    CreateArena(&engine.frame_render_arena, Megabytes(1),  engine.engine_memory);
-    CreateArena(&engine.engine_arena,       Megabytes(15),  engine.engine_memory + Megabytes(1));
-    CreateArena(&engine.resource_arena,     Megabytes(48), engine.engine_memory + Megabytes(16));
+    CreateArena(&engine.frame_render_arena, Megabytes(16), engine.engine_memory);
+    CreateArena(&engine.engine_arena,       Megabytes(16), engine.engine_memory + Megabytes(16));
+    CreateArena(&engine.resource_arena,     Megabytes(32), engine.engine_memory + Megabytes(32));
 
     uint32 monitor_refresh_hz = 60;
     uint32 target_framerate = 60;
