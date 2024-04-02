@@ -557,7 +557,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         // draw world axis
         //renderer_upload_uniform_float4x4(&render_state->simple_shader, "r_Transform", 
         //                                 eye);
-        //renderer_draw_geometry(&render_state->axis_geom);
+        //backend->draw_geometry(&render_state->axis_geom);
 
         backend->enable_stencil_test();
         backend->set_stencil_mask(0xFF);
@@ -576,7 +576,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
                 backend->bind_texture_2D(render_state->white_tex, 0);
             }
 
-            renderer_draw_geometry(&cmd.geom);
+            backend->draw_geometry(&cmd.geom);
         }
         backend->set_stencil_mask(0xFF);
         backend->set_stencil_func(render_stencil_func::NotEqual, 100, 0xFF);
@@ -634,7 +634,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
 
                         backend->upload_uniform_float4x4(shadow_static.r_Transform,
                                                          cmd.model_matrix);
-                        renderer_draw_geometry(&cmd.geom);
+                        backend->draw_geometry(&cmd.geom);
                     }
                 }
                 backend->pop_debug_group();
@@ -661,7 +661,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
 
                         backend->upload_uniform_float4x4(shadow_skinned.r_Transform,
                                                          cmd.model_matrix);
-                        renderer_draw_geometry(&cmd.geom);
+                        backend->draw_geometry(&cmd.geom);
                     }
                 }
                 backend->pop_debug_group();
@@ -720,7 +720,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
 
                     backend->upload_uniform_float4x4(prepass_static.r_Transform,
                                                      cmd.model_matrix);
-                    renderer_draw_geometry(&cmd.geom);
+                    backend->draw_geometry(&cmd.geom);
                 }
             }
             backend->pop_debug_group();
@@ -768,7 +768,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
 
                     backend->upload_uniform_float4x4(prepass_skinned.r_Transform,
                                                      cmd.model_matrix);
-                    renderer_draw_geometry(&cmd.geom);
+                    backend->draw_geometry(&cmd.geom);
                 }
             }
             backend->pop_debug_group();
@@ -935,17 +935,17 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
 
             renderer_upload_uniform_float4x4(&render_state->wireframe_shader, "r_Transform",
                                              packet->collider_geom.model_matrix);
-            renderer_draw_geometry(&packet->collider_geom.geom);
-            //renderer_draw_geometry(&render_state->axis_geom);
+            backend->draw_geometry(&packet->collider_geom.geom);
+            //backend->draw_geometry(&render_state->axis_geom);
 
             for (uint32 cmd_index = 0; cmd_index < packet->num_commands; cmd_index++) {
                 renderer_upload_uniform_float4x4(&render_state->wireframe_shader, "r_Transform",
                                                  packet->commands[cmd_index].model_matrix);
-                renderer_draw_geometry(&packet->commands[cmd_index].geom);
+                backend->draw_geometry(&packet->commands[cmd_index].geom);
             
                 laml::Vec4 point_color = { .8f, 0.4f, 0.25f, 1.0f };
                 renderer_upload_uniform_float4(&render_state->wireframe_shader, "u_color", point_color);
-                renderer_draw_geometry_points(&packet->commands[cmd_index].geom);
+                backend->draw_geometry_points(&packet->commands[cmd_index].geom);
             }
 
             // draw sphere at contact point
@@ -955,7 +955,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
             laml::transform::create_transform(transform, rot, (packet->contact_point + laml::Vec3(-0.4f)), scale);
             renderer_upload_uniform_float4x4(&render_state->wireframe_shader, "r_Transform",
                                              transform);
-            renderer_draw_geometry(&render_state->cube_geom);
+            backend->draw_geometry(&render_state->cube_geom);
 
             renderer_end_wireframe();
 
@@ -968,10 +968,10 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
 
                 wire_color = { .7f, 0.6f, 0.35f, 1.0f };
                 renderer_upload_uniform_float4(&render_state->wireframe_shader, "u_color", wire_color);
-                renderer_draw_geometry_lines(packet->col_grid->geom);
+                backend->draw_geometry_lines(packet->col_grid->geom);
                 //wire_color = { .8f, 0.4f, 0.25f, 1.0f };
                 //renderer_upload_uniform_float4(&render_state->wireframe_shader, "u_color", wire_color);
-                //renderer_draw_geometry_points(&packet->col_grid->geom);
+                //backend->draw_geometry_points(&packet->col_grid->geom);
             }
             #endif
             // Draw the highlighted cube/faces
@@ -1005,7 +1005,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
 
                         if (draw) {
                             uint32 start_idx = tri_idx * 3;
-                            renderer_draw_geometry(&packet->commands[0].geom, start_idx, 3);
+                            backend->draw_geometry(&packet->commands[0].geom, start_idx, 3);
                         }
                     }
 
@@ -1016,7 +1016,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
                         uint32 tri_idx = packet->intersecting_triangle_indices[n];
 
                         uint32 start_idx = tri_idx * 3;
-                        renderer_draw_geometry(&packet->commands[0].geom, start_idx, 3);
+                        backend->draw_geometry(&packet->commands[0].geom, start_idx, 3);
                     }
                 }
 
@@ -1041,7 +1041,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
                             renderer_upload_uniform_float4(&render_state->wireframe_shader, "u_color", wire_color);
 
                             backend->disable_depth_test();
-                            renderer_draw_geometry_lines(&render_state->cube_geom);
+                            backend->draw_geometry_lines(&render_state->cube_geom);
                             backend->enable_depth_test();
                         }
                     }
@@ -1173,9 +1173,9 @@ void renderer_destroy_framebuffer(frame_buffer* fbo) {
 void renderer_use_shader(shader* shader_prog) {
     backend->use_shader(shader_prog);
 }
-void renderer_draw_geometry(render_geometry* geom) {
-    backend->draw_geometry(geom);
-}
+//void renderer_draw_geometry(render_geometry* geom) {
+//    backend->draw_geometry(geom);
+//}
 void renderer_draw_geometry(render_geometry* geom, uint32 start_idx, uint32 num_inds) {
     backend->draw_geometry(geom, start_idx, num_inds);
 }
