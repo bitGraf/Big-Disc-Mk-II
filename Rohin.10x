@@ -33,11 +33,11 @@
 			<AdditionalIncludePath>C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\ATLMFC\include</AdditionalIncludePath>
 			<AdditionalIncludePath>C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\include</AdditionalIncludePath>
 			<AdditionalIncludePath>C:\Program Files (x86)\Windows Kits\NETFXSDK\4.6.1\include\um</AdditionalIncludePath>
-			<AdditionalIncludePath>C:\Program Files (x86)\Windows Kits\10\include\10.0.18362.0\ucrt</AdditionalIncludePath>
-			<AdditionalIncludePath>C:\Program Files (x86)\Windows Kits\10\include\10.0.18362.0\shared</AdditionalIncludePath>
-			<AdditionalIncludePath>C:\Program Files (x86)\Windows Kits\10\include\10.0.18362.0\um</AdditionalIncludePath>
-			<AdditionalIncludePath>C:\Program Files (x86)\Windows Kits\10\include\10.0.18362.0\winrt</AdditionalIncludePath>
-			<AdditionalIncludePath>C:\Program Files (x86)\Windows Kits\10\include\10.0.18362.0\cppwinrt</AdditionalIncludePath>
+			<AdditionalIncludePath>C:\Program Files (x86)\Windows Kits\10\include\10.0.22621.0\ucrt</AdditionalIncludePath>
+			<AdditionalIncludePath>C:\Program Files (x86)\Windows Kits\10\include\10.0.22621.0\shared</AdditionalIncludePath>
+			<AdditionalIncludePath>C:\Program Files (x86)\Windows Kits\10\include\10.0.22621.0\um</AdditionalIncludePath>
+			<AdditionalIncludePath>C:\Program Files (x86)\Windows Kits\10\include\10.0.22621.0\winrt</AdditionalIncludePath>
+			<AdditionalIncludePath>C:\Program Files (x86)\Windows Kits\10\include\10.0.22621.0\cppwinrt</AdditionalIncludePath>
 			<AdditionalIncludePath>W:\Rohin\Engine\src</AdditionalIncludePath>
 		</AdditionalIncludePaths>
 		<Defines>
@@ -55,7 +55,9 @@
 			</ConfigAndPlatform>
 			<Config>
 				<Name>Debug</Name>
-				<Defines></Defines>
+				<Defines>
+					<Define>DEBUG</Define>
+				</Defines>
 			</Config>
 			<Platform>
 				<Name>x64</Name>

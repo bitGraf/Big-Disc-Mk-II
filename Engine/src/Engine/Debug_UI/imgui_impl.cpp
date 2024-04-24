@@ -1,5 +1,7 @@
 #include "Engine/Defines.h"
 
+#if defined(RH_IMGUI)
+
 // Note: redefine this to export ImGui symbols in rohin.dll
 #define IMGUI_API RHAPI
 #include "imgui.cpp"
@@ -18,4 +20,7 @@
 //           This one is fine (as of 3/2/2024) v1.90.4
 #include "backends/imgui_impl_opengl3.cpp"
 
+
 #pragma warning ( pop ) 
+
+#endif

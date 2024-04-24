@@ -17,8 +17,10 @@
 #include <stdio.h>
 //#include "Engine/Platform/WGL/win32_opengl.h"
 
+#if defined(RH_IMGUI)
 #include "backends/imgui_impl_win32.h"
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+#endif
 
 // https://learn.microsoft.com/en-us/windows/win32/dxtecharts/taking-advantage-of-high-dpi-mouse-movement?redirectedfrom=MSDN#wm_input
 // you can #include <hidusage.h> for these defines
@@ -446,8 +448,10 @@ void win32_update_mouse_rect(HWND window, long new_width, long new_height, RECT*
 }
 
 LRESULT CALLBACK win32_window_callback(HWND window, uint32 message, WPARAM w_param, LPARAM l_param) {
+    #if defined(RH_IMGUI)
     if (ImGui_ImplWin32_WndProcHandler(window, message, w_param, l_param))
         return true;
+    #endif
 
     event_context no_data = {};
     switch (message) {
@@ -805,6 +809,10 @@ void platform_update_mouse() {
 
         SetCursorPos(center_x,center_y);
     }
+}
+
+void* platform_get_window_handle() {
+    return global_win32_state.window;
 }
 
 #endif //#if RH_PLATFORM_WINDOWS

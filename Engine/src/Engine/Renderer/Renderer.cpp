@@ -15,14 +15,16 @@
 
 #include "Engine/Core/Timing.h"
 
+#if defined(RH_IMGUI)
 #include "imgui.h"
+#endif
 
 // include auto-generated shader source headers
 #include "Engine/Renderer/ShaderSrc/ShaderSrc.h"
 
 #include <stdarg.h>
 
-#define SIMPLE_RENDER_PASS 0
+#define SIMPLE_RENDER_PASS 1
 
 struct renderer_state {
     uint32 render_width;
@@ -77,7 +79,8 @@ global_variable renderer_api* backend;
 global_variable renderer_state* render_state;
 
 bool32 renderer_initialize(memory_arena* arena, const char* application_name, platform_state* plat_state) {
-    if (!renderer_api_create(arena, RENDERER_API_OPENGL, plat_state, &backend)) {
+    //if (!renderer_api_create(arena, RENDERER_API_OPENGL, plat_state, &backend)) {
+    if (!renderer_api_create(arena, RENDERER_API_DIRECTX_12, plat_state, &backend)) {
         return false;
     }
 
@@ -500,14 +503,17 @@ void renderer_on_event(uint16 code, void* sender, void* listener, event_context 
 void renderer_shutdown() {
     renderer_shutdown_debug_UI();
 
+    backend->shutdown();
     renderer_api_destroy(backend);
     backend = 0;
 }
 
 bool32 renderer_begin_Frame(real32 delta_time) {
+    #if defined(RH_IMGUI)
     ImGui::Begin("Renderer");
     ImGui::Text("delta_time: %.2f ms", delta_time*1000.0f);
     ImGui::Text("frame_number: %d", backend->frame_number);
+    #endif
 
     if (!backend->begin_frame(delta_time)) {
         return false;
@@ -521,7 +527,9 @@ bool32 renderer_begin_Frame(real32 delta_time) {
     return true;
 }
 bool32 renderer_end_Frame(real32 delta_time, bool32 draw_ui) {
+    #if defined(RH_IMGUI)
     ImGui::End(); // ImGui::Begin("Renderer");
+    #endif
     renderer_debug_UI_end_frame(draw_ui);
 
     bool32 result = backend->end_frame(delta_time);
@@ -534,8 +542,10 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         // render all commands in the packet
         laml::Mat4 eye(1.0f);
 
+        #if defined(RH_IMGUI)
         ImGui::Text("%d render commands", packet->num_commands);
         ImGui::SeparatorText("Frame Timing");
+        #endif
 
         laml::Mat4 cam_transform;
         laml::transform::create_transform(cam_transform, packet->camera_orientation, packet->camera_pos);
@@ -573,7 +583,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
             if (mat.flag & 0x02) {
                 backend->bind_texture_2D(mat.DiffuseTexture, 0);
             } else {
-                backend->bind_texture_2D(render_state->white_tex, 0);
+                backend->bind_texture_2D(render_state->white_tex.texture, 0);
             }
 
             backend->draw_geometry(&cmd.geom);
@@ -594,11 +604,13 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         skybox_view.c_34 = 0;
         backend->upload_uniform_float4x4(render_state->skybox_shader.r_View, skybox_view);
         backend->upload_uniform_float4x4(render_state->skybox_shader.r_Projection, packet->projection_matrix);
-        backend->bind_texture_cube(render_state->cube_tex, 0);
+        backend->bind_texture_cube(render_state->cube_tex.texture, 0);
 
         backend->draw_geometry(&render_state->cube_geom);
 
+        #if defined(RH_IMGUI)
         ImGui::Text("Simple Render Pass: %.2f ms", measure_elapsed_time(simple_pass_start)*1000.0f);
+        #endif
         
 #else
         time_point pbr_pass_start = start_timer();
@@ -774,7 +786,9 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
             backend->pop_debug_group();
         }
         backend->pop_debug_group(); // G-Buffer Generation
+        #if defined(RH_IMGUI)
         ImGui::Text(" Prepass: %.2f ms", measure_elapsed_time(last_time, &last_time)*1000.0f);
+        #endif
 
         // LIGHTING STAGE
         backend->push_debug_group("Lighting");
@@ -834,7 +848,9 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         backend->enable_depth_test();
 
         backend->pop_debug_group(); // Lighting
+        #if defined(RH_IMGUI)
         ImGui::Text(" Lighting: %.2f ms", measure_elapsed_time(last_time, &last_time)*1000.0f);
+        #endif
 
         // Draw Skybox
         backend->use_framebuffer(0);
@@ -864,7 +880,9 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
             backend->draw_geometry(&render_state->cube_geom);
 
             backend->pop_debug_group();  //Skybox
+            #if defined(RH_IMGUI)
             ImGui::Text(" Skybox: %.2f ms", measure_elapsed_time(last_time, &last_time)*1000.0f);
+            #endif
         }
 
         // SCREEN STAGE
@@ -893,6 +911,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         backend->draw_geometry(&render_state->screen_quad);
 
         static laml::Vec4 rect(10.0f, 10.0f, 250.0f, 250.0f);
+        #if defined(RH_IMGUI)
         ImGui::Begin("ShadowMap");
         ImGui::SliderFloat("X", &rect.x, 0, (real32)render_state->render_width);
         ImGui::SliderFloat("Y", &rect.y, 0, (real32)render_state->render_height);
@@ -900,6 +919,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         rect.w = rect.z; // keep it square
         //ImGui::SliderFloat("Height", &rect.w, 0, (real32)render_state->render_height);
         ImGui::End();
+        #endif
         if (render_state->visualize_maps) {
             backend->disable_stencil_test();
             backend->use_shader((shader*)(&render_state->vis_shader));
@@ -915,10 +935,14 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         backend->enable_depth_test();
 
         backend->pop_debug_group();  //Screen Composite
+        #if defined(RH_IMGUI)
         ImGui::Text(" Present: %.2f ms", measure_elapsed_time(last_time, &last_time)*1000.0f);
+        #endif
 
         backend->pop_debug_group(); // PBR Pipeline
+        #if defined(RH_IMGUI)
         ImGui::Text("Total: %.2f ms", measure_elapsed_time(pbr_pass_start)*1000.0f);
+        #endif
         
 #endif
 
@@ -1071,6 +1095,9 @@ void renderer_resized(uint32 width, uint32 height) {
         render_state->render_width = width;
         render_state->render_height = height;
 
+        backend->resized((uint16)width, (uint16)height);
+
+
         #if SIMPLE_RENDER_PASS
         // simple pass has no FBOs that need updating
 
@@ -1192,6 +1219,7 @@ void renderer_draw_geometry_points(render_geometry* geom) {
 
 // debug_ui
 void renderer_create_debug_UI() {
+    #if defined(RH_IMGUI)
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -1208,26 +1236,33 @@ void renderer_create_debug_UI() {
 
     // Setup Platform/Renderer backends
     backend->ImGui_Init();
+    #endif
 }
 
 void renderer_shutdown_debug_UI() {
+    #if defined(RH_IMGUI)
     backend->ImGui_Shutdown();
     ImGui::DestroyContext();
     RH_INFO("ImGui Context destroyed.");
+    #endif
 }
 
 void renderer_debug_UI_begin_frame() {
+    #if defined(RH_IMGUI)
     backend->ImGui_begin_frame();
     ImGui::NewFrame();
+    #endif
 }
 
 void renderer_debug_UI_end_frame(bool32 draw_ui) {
+    #if defined(RH_IMGUI)
     ImGui::Render(); // always call this, even if we don't draw to screen
     if (draw_ui) {
         backend->push_debug_group("ImGui");
         backend->ImGui_end_frame();
         backend->pop_debug_group(); // ImGui
     }
+    #endif
 }
 
 // Precompute environment maps
@@ -1445,4 +1480,8 @@ void renderer_get_texture_data(render_texture_2D texture, void* data, int num_ch
 
 void renderer_get_cubemap_data(render_texture_cube texture, void* data, int num_channels, bool is_hdr, uint32 face, uint32 mip) {
     backend->get_cubemap_data(texture, data, num_channels, is_hdr, face, mip);
+}
+
+void renderer_present() {
+    backend->present(0);
 }

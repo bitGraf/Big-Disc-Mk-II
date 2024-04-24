@@ -30,6 +30,8 @@ bool32 renderer_initialize(memory_arena* arena, const char* application_name, pl
 bool32 renderer_create_pipeline();
 void renderer_shutdown();
 
+void renderer_present();
+
 void renderer_resized(uint32 width, uint32 height);
 void renderer_on_event(uint16 code, void* sender, void* listener, event_context context);
 

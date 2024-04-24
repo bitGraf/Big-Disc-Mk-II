@@ -16,6 +16,7 @@ struct collision_grid;
 
 enum renderer_api_type {
     RENDERER_API_OPENGL,
+    RENDERER_API_DIRECTX_12,
 };
 
 enum class ShaderDataType : uint8 {
@@ -297,6 +298,7 @@ struct renderer_api {
 
     virtual bool32 begin_frame(real32 delta_time) = 0;
     virtual bool32 end_frame(real32 delta_time) = 0;
+    virtual bool32 present(uint32 sync_interval) = 0;
 
     virtual bool32 ImGui_Init() = 0;
     virtual bool32 ImGui_begin_frame() = 0;

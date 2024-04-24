@@ -18,7 +18,9 @@
 
 #include <Engine/Platform/Platform.h>
 
+#if defined(RH_IMGUI)
 #include <imgui/imgui.h>
+#endif
 
 // Game code interface
 global_variable char libgame_filename[256];
@@ -220,11 +222,13 @@ bool32 game_update_and_render(RohinApp* app, render_packet* packet, real32 delta
     real32 max_delta_t = 1.0f/60.0f;
     state->current_scene = state->game.GameUpdate(&state->memory, packet, (delta_time > max_delta_t) ? max_delta_t : delta_time);
 
+    #if defined(RH_IMGUI)
     // Create ImGui window
     ImGui::Begin("RohinGame");
     ImGui::Text("Window made by %s", __FILE__);
     ImGui::Text("  DeltaTime: %.3f ms",  delta_time*1000.0f);
     ImGui::Text("  Framerate: %.3f fps", 1.0f / delta_time);
+    #endif
 
     // simulate game state
     laml::Mat4 eye(1.0f);
@@ -441,8 +445,10 @@ bool32 game_update_and_render(RohinApp* app, render_packet* packet, real32 delta
     }
 
     // timing
+    #if defined(RH_IMGUI)
     ImGui::Text("Game: Update and Render - %.3f ms", measure_elapsed_time(update_start)*1000.0f);
     ImGui::End();
+    #endif
 
     return true;
 }

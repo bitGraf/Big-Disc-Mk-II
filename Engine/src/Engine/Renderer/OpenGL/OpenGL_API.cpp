@@ -3,6 +3,7 @@
 #include "Engine/Core/Logger.h"
 #include "Engine/Core/Asserts.h"
 #include "Engine/Memory/Memory.h"
+#include "Engine/Platform/Platform.h"
 
 #include "OpenGL_Types.h"
 #include "OpenGL_Platform.h"
@@ -132,6 +133,11 @@ bool32 OpenGL_api::begin_frame(real32 delta_time) {
     return true;
 }
 bool32 OpenGL_api::end_frame(real32 delta_time) {
+    return true;
+}
+bool32 OpenGL_api::present(uint32 sync_interval) {
+    platform_swap_buffers();
+
     return true;
 }
 

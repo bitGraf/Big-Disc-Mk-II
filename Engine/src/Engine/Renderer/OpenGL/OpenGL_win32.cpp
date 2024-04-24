@@ -17,9 +17,11 @@
     #define __DESIRED_GL_VERSION_MINOR 0
 #endif
 
+#if defined(RH_IMGUI)
 #include "imgui.h"
 #include "backends/imgui_impl_win32.h"
 #include "backends/imgui_impl_opengl3.h"
+#endif
 
 /******************************************************************************
     * WGL_ARB_extensions_string 
@@ -298,29 +300,37 @@ bool32 OpenGL_ImGui_Init() {
         return false;
     }
 
+    #if defined(RH_IMGUI)
     // setup imgui
     ImGui_ImplWin32_Init(window);
     ImGui_ImplOpenGL3_Init();
+    #endif
 
     return true;
 }
 
 bool32 OpenGL_ImGui_Shutdown() {
+    #if defined(RH_IMGUI)
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplWin32_Shutdown();
+    #endif
 
     return true;
 }
 
 bool32 OpenGL_ImGui_Begin_Frame() {
+    #if defined(RH_IMGUI)
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplWin32_NewFrame();
+    #endif
 
     return true;
 }
 
 bool32 OpenGL_ImGui_End_Frame() {
+    #if defined(RH_IMGUI)
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    #endif
     
     return true;
 }

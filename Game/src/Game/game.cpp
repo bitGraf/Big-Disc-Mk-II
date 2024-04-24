@@ -17,7 +17,7 @@
 #include <Engine/Animation/Animation.h>
 #include <Engine/Scene/Scene.h>
 
-#include <imgui/imgui.h>
+#include <Engine/Debug_UI/Debug_UI.h>
 
 struct game_state {
     memory_arena arena;
@@ -59,7 +59,7 @@ void init_game(game_state* state, game_memory* memory) {
     real32 roll;
     laml::transform::decompose(rot, state->sun_yp[0], state->sun_yp[0], roll);
 
-    resource_load_env_map("Data/env_maps/newport_loft.hdr", &state->scene.sky.environment);
+    //resource_load_env_map("Data/env_maps/newport_loft.hdr", &state->scene.sky.environment);
     state->scene.sky.draw_skybox = false;
 
     resource_static_mesh* mesh = PushStruct(&state->arena, resource_static_mesh);
@@ -86,6 +86,7 @@ GAME_API GAME_UPDATE_FUNC(GameUpdate) {
         RH_INFO("------ Scene Initialized -----------------------");
     }
 
+    #if defined(RH_IMGUI)
     // Debug window
     char label_name[64];
     ImGui::Begin("Scene");
@@ -213,6 +214,7 @@ GAME_API GAME_UPDATE_FUNC(GameUpdate) {
     }
 
     ImGui::End();
+    #endif
 
     return &state->scene;
 }

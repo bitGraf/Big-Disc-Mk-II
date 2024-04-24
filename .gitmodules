@@ -4,3 +4,6 @@
 [submodule "Engine/deps/math_lib"]
 	path = Engine/deps/math_lib
 	url = https://github.com/bitGraf/math_lib.git
+[submodule "Engine/deps/DirectX12-Headers"]
+	path = Engine/deps/DirectX12-Headers
+	url = https://github.com/microsoft/DirectX-Headers.git

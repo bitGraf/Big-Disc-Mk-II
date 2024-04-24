@@ -10,7 +10,10 @@
 
 #include "Engine/Renderer/Renderer.h"
 #include "Engine/Resources/Resource_Manager.h"
+
+#if defined(RH_IMGUI)
 #include "Imgui.h"
+#endif
 
 struct RohinEngine {
     RohinApp* app;
@@ -232,6 +235,7 @@ bool32 start_rohin_engine(RohinApp* app) {
                 engine.app->update_and_render(engine.app, packet, engine.last_frame_time);
 
                 // draw Engine debug stats
+#if defined(RH_IMGUI)
                 ImGui::Begin("Engine");
                 ImGui::Text("Total Memory:   %llu Mb (%llu Kb used)", (engine.engine_memory_size)/(1024*1024), (engine.frame_render_arena.Used+engine.engine_arena.Used+engine.resource_arena.Used)/1024);
                 ImGui::Text("  engine_arena:    %2llu Mb (%llu Kb used)",   (engine.engine_arena.Size)/(1024*1024),       (engine.engine_arena.Used)/1024);
@@ -242,6 +246,7 @@ bool32 start_rohin_engine(RohinApp* app) {
                 ImGui::Separator();
                 ImGui::Text("%d cmds | %d skeletons", packet->num_commands, packet->num_skeletons);
                 ImGui::End();
+#endif
 
                 // sort packet commands into static/skinned command lists
                 packet->_num_skinned = packet->num_skeletons;
@@ -290,7 +295,7 @@ bool32 start_rohin_engine(RohinApp* app) {
                 LastCounter = EndCounter;
     
                 //Win32DisplayBufferToWindow(DeviceContext, Dimension.Width, Dimension.Height);
-                platform_swap_buffers();
+                renderer_present();
     
                 FlipWallClock = platform_get_wall_clock();
 

@@ -2,7 +2,7 @@
 
 #include "../Renderer_API.h"
 
-struct OpenGL_api final : public renderer_api {
+struct DirectX12_api final : public renderer_api {
     bool32 initialize(const char* application_name, struct platform_state* plat_state) override final;
     void shutdown() override final;
 
