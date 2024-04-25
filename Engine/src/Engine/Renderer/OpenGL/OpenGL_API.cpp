@@ -119,7 +119,6 @@ bool32 OpenGL_api::initialize(const char* application_name, platform_state* plat
     return true;
 }
 void OpenGL_api::shutdown() {
-    OpenGL_ImGui_Shutdown();
 }
 
 void OpenGL_api::resized(uint16 width, uint16 height) {

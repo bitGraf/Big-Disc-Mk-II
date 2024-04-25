@@ -46,6 +46,7 @@
 			<Define>_MSC_VER</Define>
 			<Define>RH_INTERNAL</Define>
 			<Define>RH_COMPILE_OPENGL_4_4</Define>
+			<Define>RH_IMGUI</Define>
 		</Defines>
 		<ConfigProperties>
 			<ConfigAndPlatform>

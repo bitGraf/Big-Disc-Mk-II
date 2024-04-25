@@ -15,6 +15,13 @@
 #include <dxgi1_6.h>
 #include <wrl.h>
 
+// ImGui backend
+#if defined(RH_IMGUI)
+    #include "imgui.h"
+    #include "backends/imgui_impl_win32.h"
+    #include "backends/imgui_impl_dx12.h"
+#endif
+
 struct DX12State {
     // DirectX 12 Objects
     Microsoft::WRL::ComPtr<ID3D12Device5>               Device;
@@ -27,8 +34,8 @@ struct DX12State {
     Microsoft::WRL::ComPtr<ID3D12RootSignature>         RootSignature;
     Microsoft::WRL::ComPtr<ID3D12PipelineState>         PSO_Standard;
     Microsoft::WRL::ComPtr<ID3D12PipelineState>         PSO_Blend;
-    uint32                                              backbuffer_width  = 800;
-    uint32                                              backbuffer_height = 600;
+    uint32                                              backbuffer_width  = 100;
+    uint32                                              backbuffer_height = 100;
 
     // Descriptor Heaps
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>        RTV_DescriptorHeap;
@@ -39,6 +46,8 @@ struct DX12State {
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>        CBV_SRV_UAV_DescriptorHeap;
     uint32                                              CBV_SRV_UAV_DescriptorSize;
+
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>        imgui_heap;
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>        Sam_DescriptorHeap;
     uint32                                              Sam_DescriptorSize;
@@ -654,6 +663,8 @@ void DirectX12_api::resized(uint16 width, uint16 height) {
     // Update the viewport transform to cover the client area.
     dx12.backbuffer_width  = width;
     dx12.backbuffer_height = height;
+
+    RH_TRACE("Renderer resized %u x %u", width, height);
 }
 
 bool32 DirectX12_api::begin_frame(real32 delta_time) {
@@ -717,15 +728,58 @@ bool32 DirectX12_api::present(uint32 sync_interval) {
 }
 
 bool32 DirectX12_api::ImGui_Init() {
+    #if defined(RH_IMGUI)
+        HWND window = GetActiveWindow();
+        if (!window) {
+            return false;
+        }
+
+        // create the cbv/srv/uav heap that ImGui will use
+        D3D12_DESCRIPTOR_HEAP_DESC desc = {};
+        desc.NumDescriptors = 1;
+        desc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        desc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        desc.NodeMask       = 0;
+
+        if FAILED(dx12.Device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&dx12.imgui_heap))) {
+            RH_FATAL("Failed making imgui_heap descriptor heap");
+            return false;
+        }
+        
+        // setup imgui
+        ImGui_ImplWin32_Init(window);
+        ImGui_ImplDX12_Init(dx12.Device.Get(), dx12.num_frames_in_flight, DXGI_FORMAT_R8G8B8A8_UNORM, 
+                            dx12.imgui_heap.Get(),
+                            dx12.imgui_heap->GetCPUDescriptorHandleForHeapStart(),
+                            dx12.imgui_heap->GetGPUDescriptorHandleForHeapStart());
+    #endif
+
     return true;
 }
 bool32 DirectX12_api::ImGui_begin_frame() {
+    #if defined(RH_IMGUI)
+        ImGui_ImplDX12_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+    #endif
+
     return true;
 }
 bool32 DirectX12_api::ImGui_end_frame() {
+    #if defined(RH_IMGUI)
+        // Bind the descriptor heaps being used
+        ID3D12DescriptorHeap* descriptorHeaps[] = { dx12.imgui_heap.Get() };
+        dx12.CmdList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), dx12.CmdList.Get());
+    #endif
+
     return true;
 }
 bool32 DirectX12_api::ImGui_Shutdown() {
+    #if defined(RH_IMGUI)
+        ImGui_ImplDX12_Shutdown();
+        ImGui_ImplWin32_Shutdown();
+    #endif
+
     return true;
 }
 
