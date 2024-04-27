@@ -43,10 +43,19 @@ bool32 create_application(RohinApp* app) {
         char* log_level_str = get_config_string(&config, "app_config.log_level", "INFO");
         app->app_config.app_log_level = log_level_from_string(log_level_str);
 
+        char* api_str = get_config_string(&config, "app_config.backend_api", "OpenGL");
+        app->app_config.backend_api = RENDERER_API_OPENGL;
+        if (string_compare(api_str, "OpenGL") == 0) {
+            app->app_config.backend_api = RENDERER_API_OPENGL;
+        } else if (string_compare(api_str, "DirectX12")==0) {
+            app->app_config.backend_api = RENDERER_API_DIRECTX_12;
+        }
+
     } else {
         memory_copy(app->app_config.application_name, "Rohin App", 10);
 
         app->app_config.app_log_level = log_level::LOG_LEVEL_INFO;
+        app->app_config.backend_api = RENDERER_API_OPENGL;
 
         app->app_config.start_x = 10;
         app->app_config.start_y = 10;

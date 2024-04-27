@@ -54,7 +54,7 @@ struct file_handle {
     uint64 num_bytes;
     uint8* data;
 };
-size_t platform_get_full_resource_path(char* buffer, size_t buffer_length, const char* resource_path);
+RHAPI size_t platform_get_full_resource_path(char* buffer, size_t buffer_length, const char* resource_path);
 RHAPI file_handle platform_read_entire_file(const char* full_path);
 RHAPI void platform_free_file_data(file_handle* handle);
 

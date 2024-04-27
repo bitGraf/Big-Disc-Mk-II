@@ -10,7 +10,7 @@ struct memory_arena;
 RHAPI uint8* AdvanceBufferSize_(uint8** Buffer, uint64 Size, uint8* End);
 
 RHAPI uint64 string_copy(char* dst_buffer, uint64 dst_buf_size, char* src_buffer);
-RHAPI uint64 string_length(char* buffer);
+RHAPI uint64 string_length(const char* buffer);
 RHAPI int string_build(char* buffer, uint64 buf_size, char* fmt, ...);
 RHAPI int string_compare(const char* str1, const char* str2);
 RHAPI int string_compare(const char* str1, const char* str2, uint64 num_chars);

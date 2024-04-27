@@ -3,12 +3,20 @@
 #include "Engine/Core/Logger.h"
 #include "Engine/Core/Asserts.h"
 #include "Engine/Memory/Memory.h"
+#include "Engine/Memory/Memory_Arena.h"
 #include "Engine/Platform/Platform.h"
 
 #include "OpenGL_Types.h"
 #include "OpenGL_Platform.h"
 
 #include <stdarg.h>
+
+static struct OpenGLState {
+    memory_arena* backend_storage;
+
+    GLuint bound_vao;
+    GLenum bound_ebo_type;
+} OpenGL;
 
 internal_func GLenum ShaderDataTypeToOpenGLBaseType(ShaderDataType Type) {
     switch (Type) {
@@ -97,7 +105,9 @@ internal_func uint32 ShaderDataTypeSize(ShaderDataType Type) {
     return 0;
 }
 
-bool32 OpenGL_api::initialize(const char* application_name, platform_state* plat_state) {
+bool32 OpenGL_api::initialize(const char* application_name, 
+                              struct platform_state* plat_state,
+                              memory_arena* backend_storage) {
     if (!OpenGL_create_context()) {
         RH_FATAL("Could not create OpenGL Context!");
         return false;
@@ -115,6 +125,8 @@ bool32 OpenGL_api::initialize(const char* application_name, platform_state* plat
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    OpenGL.backend_storage = backend_storage;
 
     return true;
 }
@@ -138,6 +150,13 @@ bool32 OpenGL_api::present(uint32 sync_interval) {
     platform_swap_buffers();
 
     return true;
+}
+
+uint32 OpenGL_api::get_batch_size() {
+    return 1024;
+}
+
+void OpenGL_api::set_batch_index(uint32 index) {
 }
 
 bool32 OpenGL_api::ImGui_Init() {
@@ -408,7 +427,7 @@ struct vertex_layout {
     uint32 num_attributes;
 };
 
-vertex_layout calculate_stride(const ShaderDataType* attributes) {
+internal_func vertex_layout calculate_stride(const ShaderDataType* attributes) {
     vertex_layout layout = {};
     for (const ShaderDataType* scan = attributes; *scan != ShaderDataType::None; scan++) {
         layout.num_attributes++;
@@ -430,7 +449,6 @@ void OpenGL_api::create_mesh(render_geometry* mesh,
 
     mesh->num_verts = num_verts;
     mesh->num_inds = num_inds;
-    mesh->flag = 0;
 
     // first create the VBO
     uint32 vbo;
@@ -443,10 +461,17 @@ void OpenGL_api::create_mesh(render_geometry* mesh,
     glGenBuffers(1, &ebo);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, num_inds*sizeof(uint32), indices, GL_STATIC_DRAW);
+    mesh->index_buffer.handle = 0;
+    mesh->index_buffer.index_type = Index_Buffer_Type::UInt32;
+    mesh->index_buffer.buffer_size = sizeof(uint32) * num_inds;
 
     // create the VAO
-    glGenVertexArrays(1, &mesh->handle);
-    glBindVertexArray(mesh->handle);
+    uint32 vao_handle;
+    glGenVertexArrays(1, &vao_handle);
+    glBindVertexArray(vao_handle);
+    mesh->vertex_buffer.handle = vao_handle;
+    mesh->vertex_buffer.buffer_stride = layout.stride;
+    mesh->vertex_buffer.buffer_size = layout.stride * num_verts;
 
     // assign vertex attributes
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
@@ -482,7 +507,8 @@ void OpenGL_api::create_mesh(render_geometry* mesh,
     glBindVertexArray(0);
 }
 void OpenGL_api::destroy_mesh(render_geometry* mesh) {
-    glDeleteVertexArrays(1, &mesh->handle);
+    uint32 vao_handle = (uint32)mesh->vertex_buffer.handle;
+    glDeleteVertexArrays(1, &vao_handle);
 }
 
 // TODO: move these string-parsing functions to a better place!
@@ -955,6 +981,14 @@ void OpenGL_api::copy_framebuffer_stencilbuffer(frame_buffer * src, frame_buffer
     }
 }
 
+void OpenGL_api::create_render_pass(render_pass* pass, uint64 sz_per_pass, uint64 sz_per_obj) {
+    pass->per_frame  = (uint8*)PushSize_(OpenGL.backend_storage, sz_per_pass);
+    pass->per_object = (uint8*)PushSize_(OpenGL.backend_storage, sz_per_obj*get_batch_size());
+}
+void OpenGL_api::begin_render_pass(render_pass* pass) {
+}
+void OpenGL_api::end_render_pass(render_pass* pass) {
+}
 
 void OpenGL_api::use_shader(shader* shader_prog) {
     glUseProgram(shader_prog->handle);
@@ -967,30 +1001,46 @@ void OpenGL_api::use_framebuffer(frame_buffer* fbuffer) {
     }
 }
 
-void OpenGL_api::draw_geometry(render_geometry* geom) {
-    glBindVertexArray(geom->handle);
-    glDrawElements(GL_TRIANGLES, geom->num_inds, GL_UNSIGNED_INT, 0);
+void OpenGL_api::bind_geometry(render_geometry* geom) {
+    // NOTE: For some reason I have yet to figure out, to draw anything
+    //       correctly, I need to bindvao(geom), draw(...), then bindvao(0).
+    //       If I don't rebind() and bind(0) for every call, things break.
+    //       I decided to restructure things in a better way (that also works
+    //       with DirectX) where binding and drawing are seperated. For OpenGL,
+    //       this means we need to know which vao to bind.
+
+    OpenGL.bound_vao = (GLuint)geom->vertex_buffer.handle;
+
+    switch (geom->index_buffer.index_type) {
+        case Index_Buffer_Type::UInt16: OpenGL.bound_ebo_type = GL_UNSIGNED_SHORT; break;
+        case Index_Buffer_Type::UInt32: OpenGL.bound_ebo_type = GL_UNSIGNED_INT;   break;
+    }
+}
+
+void OpenGL_api::draw(uint32 verts_per_instance, uint32 first_vertex) {
+    glBindVertexArray(OpenGL.bound_vao);
+    glDrawArrays(GL_TRIANGLES, first_vertex, verts_per_instance);
     glBindVertexArray(0);
 }
-void OpenGL_api::draw_geometry(render_geometry* geom, uint32 start_idx, uint32 num_inds) {
-    glBindVertexArray(geom->handle);
-    //glDrawElements(GL_TRIANGLES, num_inds, GL_UNSIGNED_INT, (void*)(&start_idx));
-    glDrawElements(GL_TRIANGLES, num_inds, GL_UNSIGNED_INT, (void*)(start_idx * sizeof(GLuint)));
+void OpenGL_api::draw_instanced(uint32 verts_per_instance, uint32 instance_count,
+                                uint32 first_vertex, uint32 first_instance) {
+    glBindVertexArray(OpenGL.bound_vao);
+    glDrawArraysInstancedBaseInstance(GL_TRIANGLES, first_vertex, verts_per_instance, instance_count, first_instance);
+    glBindVertexArray(0);
 }
-void OpenGL_api::draw_geometry(render_geometry* geom, render_material* mat) {
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, mat->DiffuseTexture.handle);
 
-    glBindVertexArray(geom->handle);
-    glDrawElements(GL_TRIANGLES, geom->num_inds, GL_UNSIGNED_INT, 0);
+void OpenGL_api::draw_indexed(uint32 inds_per_instance, uint32 first_index, uint32 first_vertex) {
+    glBindVertexArray(OpenGL.bound_vao);
+    //glDrawElements(GL_TRIANGLES, inds_per_instance, OpenGL.bound_ebo_type, (void*)((uint64)first_index));
+    glDrawElementsBaseVertex(GL_TRIANGLES, inds_per_instance, OpenGL.bound_ebo_type, (void*)((uint64)first_index), first_vertex);
+    glBindVertexArray(0);
 }
-void OpenGL_api::draw_geometry_lines(render_geometry* geom) {
-    glBindVertexArray(geom->handle);
-    glDrawElements(GL_LINES, geom->num_inds, GL_UNSIGNED_INT, 0);
-}
-void OpenGL_api::draw_geometry_points(render_geometry* geom) {
-    glBindVertexArray(geom->handle);
-    glDrawElements(GL_POINTS, geom->num_inds, GL_UNSIGNED_INT, 0);
+void OpenGL_api::draw_indexed_instanced(uint32 inds_per_instance, uint32 instance_count, 
+                                        uint32 first_index, uint32 first_vertex, 
+                                        uint32 first_instance) {
+    glBindVertexArray(OpenGL.bound_vao);
+    glDrawElementsInstancedBaseVertex(GL_TRIANGLES, inds_per_instance, OpenGL.bound_ebo_type, (void*)((uint64)first_index), instance_count, first_vertex);
+    glBindVertexArray(0);
 }
 
 void OpenGL_api::bind_texture_2D(render_texture_2D texture, uint32 slot) {

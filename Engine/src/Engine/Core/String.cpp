@@ -29,9 +29,9 @@ uint64 string_copy(char* dst_buffer, uint64 dst_buf_size, char* src_buffer) {
     return num_copied;
 }
 
-uint64 string_length(char* buffer) {
+uint64 string_length(const char* buffer) {
     uint64 len = 0;
-    for (char* scan = buffer; *scan; scan++) {
+    for (const char* scan = buffer; *scan; scan++) {
         len++;
     }
 

@@ -26,6 +26,15 @@
 
 #define SIMPLE_RENDER_PASS 1
 
+struct simple_per_pass_constants {
+    laml::Mat4 proj_view;
+    laml::Vec3 color;
+};
+struct simple_per_object_constants {
+    laml::Mat4 r_Transform;
+    laml::Vec3 u_color;
+};
+
 struct renderer_state {
     uint32 render_width;
     uint32 render_height;
@@ -37,6 +46,8 @@ struct renderer_state {
     // simple render pass
     //shader simple_shader;
     shader_simple simple_shader;
+
+    render_pass simple_pass;
 #else
     // deferred pbr render pass
     shader_PrePass      static_pre_pass_shader;
@@ -78,13 +89,12 @@ struct renderer_state {
 global_variable renderer_api* backend;
 global_variable renderer_state* render_state;
 
-bool32 renderer_initialize(memory_arena* arena, const char* application_name, platform_state* plat_state) {
-    //if (!renderer_api_create(arena, RENDERER_API_OPENGL, plat_state, &backend)) {
-    if (!renderer_api_create(arena, RENDERER_API_DIRECTX_12, plat_state, &backend)) {
+bool32 renderer_initialize(memory_arena* arena, renderer_api_type backend_type, const char* application_name, platform_state* plat_state) {
+    if (!renderer_api_create(arena, backend_type, plat_state, &backend)) {
         return false;
     }
 
-    if (!backend->initialize(application_name, plat_state)) {
+    if (!backend->initialize(application_name, plat_state, arena)) {
         RH_FATAL("Renderer API failed to initialize!");
         return false;
     }
@@ -214,6 +224,10 @@ bool32 renderer_create_pipeline() {
     time_point simple_pipeline_start = start_timer();
     backend->push_debug_group("Create Simple Pipeline");
 
+    backend->create_render_pass(&render_state->simple_pass, 
+                                sizeof(simple_per_pass_constants), 
+                                sizeof(simple_per_object_constants));
+
     // setup simple shader
     shader* pSimple = (shader*)(&render_state->simple_shader);
     shader_simple& simple = render_state->simple_shader;
@@ -221,7 +235,7 @@ bool32 renderer_create_pipeline() {
         RH_FATAL("Could not setup the main shader");
         return false;
     }
-    renderer_use_shader(pSimple);
+    backend->use_shader(pSimple);
 
     simple.InitShaderLocs();
     backend->upload_uniform_int(simple.u_texture, simple.u_texture.SamplerID);
@@ -241,7 +255,7 @@ bool32 renderer_create_pipeline() {
         RH_FATAL("Could not setup the static pre-pass shader");
         return false;
     }
-    renderer_use_shader(pPrepassStatic);
+    backend->use_shader(pPrepassStatic);
     prepass_static.InitShaderLocs();
     backend->upload_uniform_int(prepass_static.u_AlbedoTexture,    prepass_static.u_AlbedoTexture.SamplerID);
     backend->upload_uniform_int(prepass_static.u_NormalTexture,    prepass_static.u_NormalTexture.SamplerID);
@@ -256,7 +270,7 @@ bool32 renderer_create_pipeline() {
         RH_FATAL("Could not setup the skinned pre-pass shader");
         return false;
     }
-    renderer_use_shader(pPrepassSkinned);
+    backend->use_shader(pPrepassSkinned);
     prepass_skinned.InitShaderLocs();
     backend->upload_uniform_int(prepass_skinned.u_AlbedoTexture,    prepass_skinned.u_AlbedoTexture.SamplerID);
     backend->upload_uniform_int(prepass_skinned.u_NormalTexture,    prepass_skinned.u_NormalTexture.SamplerID);
@@ -294,7 +308,7 @@ bool32 renderer_create_pipeline() {
         RH_FATAL("Could not setup the PBR lighting pass shader");
         return false;
     }
-    renderer_use_shader(pLighting);
+    backend->use_shader(pLighting);
     lighting.InitShaderLocs();
     backend->upload_uniform_int(lighting.u_albedo,       lighting.u_albedo.SamplerID);
     backend->upload_uniform_int(lighting.u_normal,       lighting.u_normal.SamplerID);
@@ -330,7 +344,7 @@ bool32 renderer_create_pipeline() {
         RH_FATAL("Could not setup the screen shader");
         return false;
     }
-    renderer_use_shader(pScreen);
+    backend->use_shader(pScreen);
     screen.InitShaderLocs();
     backend->upload_uniform_int(screen.u_albedo,   screen.u_albedo.SamplerID);
     backend->upload_uniform_int(screen.u_normal,   screen.u_normal.SamplerID);
@@ -358,7 +372,7 @@ bool32 renderer_create_pipeline() {
             RH_FATAL("Could not setup the BRDF Integration shader");
             return false;
         }
-        renderer_use_shader(pIntegrate);
+        backend->use_shader(pIntegrate);
         integrate.InitShaderLocs();
 
         // setup LUT texture
@@ -375,7 +389,8 @@ bool32 renderer_create_pipeline() {
         backend->set_viewport(0, 0, BRDF_LUT_SIZE, BRDF_LUT_SIZE);
         backend->use_framebuffer(&render_state->BRDF_LUT);
         backend->clear_viewport(0.0f, 0.0f, 0.0f, 0.0f);
-        backend->draw_geometry(&render_state->screen_quad);
+        backend->bind_geometry(&render_state->screen_quad);
+        backend->draw_indexed(render_state->screen_quad.num_inds, 0, 0);
 
         backend->use_framebuffer(0);
     }
@@ -392,7 +407,7 @@ bool32 renderer_create_pipeline() {
             return false;
         }
         shadow.InitShaderLocs();
-        renderer_use_shader(pShadow);
+        backend->use_shader(pShadow);
 
         // skinned shadow mapping shader
         shader* pShadowSkinned = (shader*)(&render_state->skinned_shadow_shader);
@@ -402,7 +417,7 @@ bool32 renderer_create_pipeline() {
             return false;
         }
         shadow_skinned.InitShaderLocs();
-        renderer_use_shader(pShadowSkinned);
+        backend->use_shader(pShadowSkinned);
 
         // setup shadowmap texture
         frame_buffer_attachment attachments[] = {
@@ -427,7 +442,7 @@ bool32 renderer_create_pipeline() {
             return false;
         }
         vis.InitShaderLocs();
-        renderer_use_shader(pVis);
+        backend->use_shader(pVis);
         backend->upload_uniform_int(vis.u_texture, vis.u_texture.SamplerID);
     }
 
@@ -441,7 +456,7 @@ bool32 renderer_create_pipeline() {
         RH_FATAL("Could not setup the skybox shader");
         return false;
     }
-    renderer_use_shader(pSkybox);
+    backend->use_shader(pSkybox);
     render_state->skybox_shader.InitShaderLocs();
     backend->upload_uniform_int(render_state->skybox_shader.u_skybox, render_state->skybox_shader.u_skybox.SamplerID);
 
@@ -450,7 +465,7 @@ bool32 renderer_create_pipeline() {
         RH_FATAL("Could not setup the wireframe shader");
         return false;
     }
-    renderer_use_shader(&render_state->wireframe_shader);
+    backend->use_shader(&render_state->wireframe_shader);
 
     resource_load_debug_mesh_into_geometry("Data/Models/debug/gizmo.stl", &render_state->axis_geom);
 
@@ -551,50 +566,72 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         laml::transform::create_transform(cam_transform, packet->camera_orientation, packet->camera_pos);
         laml::transform::create_view_matrix_from_transform(packet->view_matrix, cam_transform);
 
+        if (packet->num_commands > backend->get_batch_size()) {
+            RH_FATAL("Packet has more commands (%u) than backend batch size (%u)", packet->num_commands, backend->get_batch_size());
+            packet->num_commands = backend->get_batch_size();
+        }
+
 #if SIMPLE_RENDER_PASS
         time_point simple_pass_start = start_timer();
 
-        shader* pSimple = (shader*)(&render_state->simple_shader);
-        renderer_use_shader(pSimple);
+        backend->push_debug_group("Simple Rendering Pipeline");
 
-        shader_simple& simple = render_state->simple_shader;
+        backend->set_viewport(0, 0, render_state->render_width, render_state->render_height);
 
-        laml::Mat4 proj_view = laml::mul(packet->projection_matrix, packet->view_matrix);
-        backend->upload_uniform_float4x4(simple.r_VP, proj_view);
-        laml::Vec3 color(1.0f, 1.0f, 1.0f);
-        backend->upload_uniform_float3(simple.u_color, color);
+        backend->begin_render_pass(&render_state->simple_pass);
+
+        //shader* pSimple = (shader*)(&render_state->simple_shader);
+        //backend->use_shader(pSimple);
+        //shader_simple& simple = render_state->simple_shader;
+        //laml::Mat4 proj_view = laml::mul(packet->projection_matrix, packet->view_matrix);
+        //backend->upload_uniform_float4x4(simple.r_VP, proj_view);
+        //laml::Vec3 color(1.0f, 1.0f, 1.0f);
+        //backend->upload_uniform_float3(simple.u_color, color);
+
+        simple_per_pass_constants* per_frame = (simple_per_pass_constants*)render_state->simple_pass.per_frame;
+        per_frame->proj_view = laml::mul(packet->projection_matrix, packet->view_matrix);
+        per_frame->color = laml::Vec3(1.0f, 1.0f, 1.0f);
 
         // draw world axis
         //renderer_upload_uniform_float4x4(&render_state->simple_shader, "r_Transform", 
         //                                 eye);
         //backend->draw_geometry(&render_state->axis_geom);
 
-        backend->enable_stencil_test();
-        backend->set_stencil_mask(0xFF);
-        backend->set_stencil_func(render_stencil_func::Always, 100, 0xFF);
-        backend->set_stencil_op(render_stencil_op::Keep, render_stencil_op::Keep, render_stencil_op::Replace);
+        //backend->enable_stencil_test();
+        //backend->set_stencil_mask(0xFF);
+        //backend->set_stencil_func(render_stencil_func::Always, 100, 0xFF);
+        //backend->set_stencil_op(render_stencil_op::Keep, render_stencil_op::Keep, render_stencil_op::Replace);
+        simple_per_object_constants* per_object = (simple_per_object_constants*)render_state->simple_pass.per_object;
         for (uint32 cmd_index = 0; cmd_index < packet->num_commands; cmd_index++) {
             render_command& cmd = packet->commands[cmd_index];
             render_material& mat = cmd.material;
 
-            backend->upload_uniform_float4x4(simple.r_Transform, cmd.model_matrix);
+            per_object[cmd_index].r_Transform = cmd.model_matrix;
+            per_object[cmd_index].u_color = mat.DiffuseFactor;
 
-            backend->upload_uniform_float3(simple.u_color, mat.DiffuseFactor);
-            if (mat.flag & 0x02) {
-                backend->bind_texture_2D(mat.DiffuseTexture, 0);
-            } else {
-                backend->bind_texture_2D(render_state->white_tex.texture, 0);
-            }
+            //backend->upload_uniform_float4x4(simple.r_Transform, cmd.model_matrix);
+            //backend->upload_uniform_float3(simple.u_color, mat.DiffuseFactor);
+            //
+            //if (mat.flag & 0x02) {
+            //    backend->bind_texture_2D(mat.DiffuseTexture, 0);
+            //} else {
+            //    backend->bind_texture_2D(render_state->white_tex.texture, 0);
+            //}
 
-            backend->draw_geometry(&cmd.geom);
+            backend->set_batch_index(cmd_index);
+            backend->bind_geometry(&cmd.geom);
+            backend->draw_indexed(cmd.geom.num_inds, 0, 0);
         }
-        backend->set_stencil_mask(0xFF);
-        backend->set_stencil_func(render_stencil_func::NotEqual, 100, 0xFF);
-        backend->set_stencil_op(render_stencil_op::Keep, render_stencil_op::Keep, render_stencil_op::Keep);
+        //backend->set_stencil_mask(0xFF);
+        //backend->set_stencil_func(render_stencil_func::NotEqual, 100, 0xFF);
+        //backend->set_stencil_op(render_stencil_op::Keep, render_stencil_op::Keep, render_stencil_op::Keep);
+
+        backend->end_render_pass(&render_state->simple_pass);
 
         //backend->clear_viewport_only_color(0, 0, 0, 0);
 
         // Draw Skybox
+        #if 0
         shader* pSkybox = (shader*)(&render_state->skybox_shader);
         backend->use_shader(pSkybox);
         laml::Mat4 skybox_view;
@@ -606,11 +643,15 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         backend->upload_uniform_float4x4(render_state->skybox_shader.r_Projection, packet->projection_matrix);
         backend->bind_texture_cube(render_state->cube_tex.texture, 0);
 
-        backend->draw_geometry(&render_state->cube_geom);
+        backend->bind_geometry(&render_state->cube_geom);
+        backend->draw_indexed(render_state->cube_geom.num_inds, 0, 0);
+        #endif
 
         #if defined(RH_IMGUI)
         ImGui::Text("Simple Render Pass: %.2f ms", measure_elapsed_time(simple_pass_start)*1000.0f);
         #endif
+        
+        backend->pop_debug_group(); // Simple Rendering Pass
         
 #else
         time_point pbr_pass_start = start_timer();
@@ -636,7 +677,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
                 { // Static Meshes
                     shader_ShadowPass& shadow_static = render_state->static_shadow_shader;
                     shader * pShadowStatic = (shader*)(&render_state->static_shadow_shader);
-                    renderer_use_shader(pShadowStatic);
+                    backend->use_shader(pShadowStatic);
 
                     backend->upload_uniform_float4x4(shadow_static.r_LightSpace, lightSpaceMatrix);
 
@@ -646,7 +687,8 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
 
                         backend->upload_uniform_float4x4(shadow_static.r_Transform,
                                                          cmd.model_matrix);
-                        backend->draw_geometry(&cmd.geom);
+                        backend->bind_geometry(&cmd.geom);
+                        backend->draw_indexed(cmd.geom.num_inds, 0, 0);
                     }
                 }
                 backend->pop_debug_group();
@@ -655,7 +697,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
                 { // Skinned
                     shader_ShadowPass_Anim& shadow_skinned = render_state->skinned_shadow_shader;
                     shader * pShadowSkinned = (shader*)(&render_state->skinned_shadow_shader);
-                    renderer_use_shader(pShadowSkinned);
+                    backend->use_shader(pShadowSkinned);
 
                     backend->upload_uniform_float4x4(shadow_skinned.r_LightSpace, lightSpaceMatrix);
 
@@ -673,7 +715,8 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
 
                         backend->upload_uniform_float4x4(shadow_skinned.r_Transform,
                                                          cmd.model_matrix);
-                        backend->draw_geometry(&cmd.geom);
+                        backend->bind_geometry(&cmd.geom);
+                        backend->draw_indexed(cmd.geom.num_inds, 0, 0);
                     }
                 }
                 backend->pop_debug_group();
@@ -700,7 +743,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
             { // Static Meshes
                 shader_PrePass& prepass_static = render_state->static_pre_pass_shader;
                 shader * pPrepassStatic = (shader*)(&render_state->static_pre_pass_shader);
-                renderer_use_shader(pPrepassStatic);
+                backend->use_shader(pPrepassStatic);
 
                 backend->upload_uniform_float4x4(prepass_static.r_View, packet->view_matrix);
                 backend->upload_uniform_float4x4(prepass_static.r_Projection, packet->projection_matrix);
@@ -732,7 +775,8 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
 
                     backend->upload_uniform_float4x4(prepass_static.r_Transform,
                                                      cmd.model_matrix);
-                    backend->draw_geometry(&cmd.geom);
+                    backend->bind_geometry(&cmd.geom);
+                    backend->draw_indexed(cmd.geom.num_inds, 0, 0);
                 }
             }
             backend->pop_debug_group();
@@ -740,7 +784,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
             { // Skinned
                 shader_PrePass_Anim& prepass_skinned = render_state->skinned_pre_pass_shader;
                 shader * pPrepassStatic = (shader*)(&render_state->skinned_pre_pass_shader);
-                renderer_use_shader(pPrepassStatic);
+                backend->use_shader(pPrepassStatic);
 
                 backend->upload_uniform_float4x4(prepass_skinned.r_View, packet->view_matrix);
                 backend->upload_uniform_float4x4(prepass_skinned.r_Projection, packet->projection_matrix);
@@ -780,7 +824,8 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
 
                     backend->upload_uniform_float4x4(prepass_skinned.r_Transform,
                                                      cmd.model_matrix);
-                    backend->draw_geometry(&cmd.geom);
+                    backend->bind_geometry(&cmd.geom);
+                    backend->draw_indexed(cmd.geom.num_inds, 0, 0);
                 }
             }
             backend->pop_debug_group();
@@ -844,7 +889,8 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         backend->set_stencil_mask(0xFF);
         backend->set_stencil_func(render_stencil_func::Equal, 100, 0xFF);
         backend->set_stencil_op(render_stencil_op::Keep, render_stencil_op::Keep, render_stencil_op::Keep);
-        backend->draw_geometry(&render_state->screen_quad);
+        backend->bind_geometry(&render_state->screen_quad);
+        backend->draw_indexed(render_state->screen_quad.num_inds, 0, 0);
         backend->enable_depth_test();
 
         backend->pop_debug_group(); // Lighting
@@ -877,7 +923,8 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
             backend->set_stencil_mask(0xFF);
             backend->set_stencil_func(render_stencil_func::NotEqual, 100, 0xFF);
             backend->set_stencil_op(render_stencil_op::Keep, render_stencil_op::Keep, render_stencil_op::Keep);
-            backend->draw_geometry(&render_state->cube_geom);
+            backend->bind_geometry(&render_state->cube_geom);
+            backend->draw_indexed(render_state->cube_geom.num_inds, 0, 0);
 
             backend->pop_debug_group();  //Skybox
             #if defined(RH_IMGUI)
@@ -908,7 +955,8 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         backend->set_stencil_mask(0xFF);
         backend->set_stencil_func(render_stencil_func::Equal, 100, 0xFF);
         backend->set_stencil_op(render_stencil_op::Keep, render_stencil_op::Keep, render_stencil_op::Keep);
-        backend->draw_geometry(&render_state->screen_quad);
+        backend->bind_geometry(&render_state->screen_quad);
+        backend->draw_indexed(render_state->screen_quad.num_inds, 0, 0);
 
         static laml::Vec4 rect(10.0f, 10.0f, 250.0f, 250.0f);
         #if defined(RH_IMGUI)
@@ -929,7 +977,8 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
             backend->upload_uniform_float(render_state->vis_shader.r_screen_height, (real32)render_state->render_height);
 
             backend->bind_texture_2D(render_state->sun_shadow_buffer.attachments[0], render_state->vis_shader.u_texture.SamplerID);
-            backend->draw_geometry(&render_state->quad_2D);
+            backend->bind_geometry(&render_state->quad_2D);
+            backend->draw_indexed(render_state->quad_2D.num_inds, 0, 0);
         }
 
         backend->enable_depth_test();
@@ -950,7 +999,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         if (packet->draw_colliders) {
             // Render debug wireframes
             renderer_begin_wireframe();
-            renderer_use_shader(&render_state->wireframe_shader);
+            backend->use_shader(&render_state->wireframe_shader);
 
             //laml::Mat4 proj_view = laml::mul(packet->projection_matrix, packet->view_matrix);
             renderer_upload_uniform_float4x4(&render_state->wireframe_shader, "r_VP", proj_view);
@@ -959,13 +1008,15 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
 
             renderer_upload_uniform_float4x4(&render_state->wireframe_shader, "r_Transform",
                                              packet->collider_geom.model_matrix);
-            backend->draw_geometry(&packet->collider_geom.geom);
+            backend->bind_geometry(&packet->collider_geom.geom);
+            backend->draw_indexed(packet->collider_geom.num_inds, 0, 0);
             //backend->draw_geometry(&render_state->axis_geom);
 
             for (uint32 cmd_index = 0; cmd_index < packet->num_commands; cmd_index++) {
                 renderer_upload_uniform_float4x4(&render_state->wireframe_shader, "r_Transform",
                                                  packet->commands[cmd_index].model_matrix);
-                backend->draw_geometry(&packet->commands[cmd_index].geom);
+                backend->bind_geometry(&packet->commands[cmd_index].geom);
+                backend->draw_indexed(packet->commands[cmd_index].geom.num_inds, 0, 0);
             
                 laml::Vec4 point_color = { .8f, 0.4f, 0.25f, 1.0f };
                 renderer_upload_uniform_float4(&render_state->wireframe_shader, "u_color", point_color);
@@ -979,7 +1030,8 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
             laml::transform::create_transform(transform, rot, (packet->contact_point + laml::Vec3(-0.4f)), scale);
             renderer_upload_uniform_float4x4(&render_state->wireframe_shader, "r_Transform",
                                              transform);
-            backend->draw_geometry(&render_state->cube_geom);
+            backend->bind_geometry(&render_state->cube_geom);
+            backend->draw_indexed(render_state->cube_geom.num_inds, 0, 0);
 
             renderer_end_wireframe();
 
@@ -1005,7 +1057,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
                 collision_grid * grid = packet->col_grid;
 
                 if (packet->num_tris > 0) {
-                    renderer_use_shader(&render_state->simple_shader);
+                    backend->use_shader(&render_state->simple_shader);
 
                     color = laml::Vec4(0.5f, 0.6f, 0.4f, 1.0f);
                     renderer_upload_uniform_float4(&render_state->simple_shader, "u_color", color);
@@ -1029,7 +1081,8 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
 
                         if (draw) {
                             uint32 start_idx = tri_idx * 3;
-                            backend->draw_geometry(&packet->commands[0].geom, start_idx, 3);
+                            backend->bind_geometry(&packet->commands[0].geom, start_idx, 3);
+                            backend->draw_indexed(packet->commands[0].geom.num_inds, 0, 0);
                         }
                     }
 
@@ -1040,13 +1093,14 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
                         uint32 tri_idx = packet->intersecting_triangle_indices[n];
 
                         uint32 start_idx = tri_idx * 3;
-                        backend->draw_geometry(&packet->commands[0].geom, start_idx, 3);
+                        backend->bind_geometry(&packet->commands[0].geom, start_idx, 3);
+                        backend->draw_indexed(packet->commands[0].geom.num_inds, 0, 0);
                     }
                 }
 
                 #define DRAW_SECTOR 1
                 #if DRAW_SECTOR
-                renderer_use_shader(&render_state->wireframe_shader);
+                backend->use_shader(&render_state->wireframe_shader);
                 // render sector of cells
                 for (int32 x = packet->sector.x_min; x <= packet->sector.x_max; x++) {
                     for (int32 y = packet->sector.y_min; y <= packet->sector.y_max; y++) {
@@ -1197,26 +1251,6 @@ void renderer_destroy_framebuffer(frame_buffer* fbo) {
 }
 
 
-void renderer_use_shader(shader* shader_prog) {
-    backend->use_shader(shader_prog);
-}
-//void renderer_draw_geometry(render_geometry* geom) {
-//    backend->draw_geometry(geom);
-//}
-void renderer_draw_geometry(render_geometry* geom, uint32 start_idx, uint32 num_inds) {
-    backend->draw_geometry(geom, start_idx, num_inds);
-}
-void renderer_draw_geometry(render_geometry * geom, render_material * mat) {
-    backend->draw_geometry(geom, mat);
-}
-void renderer_draw_geometry_lines(render_geometry* geom) {
-    backend->draw_geometry_lines(geom);
-}
-void renderer_draw_geometry_points(render_geometry* geom) {
-    backend->draw_geometry_points(geom);
-}
-
-
 // debug_ui
 void renderer_create_debug_UI() {
     #if defined(RH_IMGUI)
@@ -1315,7 +1349,7 @@ void renderer_precompute_env_map_from_equirectangular(resource_env_map* env_map,
         return;
     }
     convert.InitShaderLocs();
-    renderer_use_shader(pConvert);
+    backend->use_shader(pConvert);
     backend->upload_uniform_int(convert.u_hdri, convert.u_hdri.SamplerID);
 
     // convolute diffuse irradiance
@@ -1326,7 +1360,7 @@ void renderer_precompute_env_map_from_equirectangular(resource_env_map* env_map,
         return;
     }
     convolute.InitShaderLocs();
-    renderer_use_shader(pConvolute);
+    backend->use_shader(pConvolute);
     backend->upload_uniform_int(convolute.u_env_cubemap, convolute.u_env_cubemap.SamplerID);
 
     // IBL Prefilter shader
@@ -1337,7 +1371,7 @@ void renderer_precompute_env_map_from_equirectangular(resource_env_map* env_map,
         return;
     }
     prefilter.InitShaderLocs();
-    renderer_use_shader(pPreFilter);
+    backend->use_shader(pPreFilter);
     backend->upload_uniform_int(prefilter.u_env_cubemap, prefilter.u_env_cubemap.SamplerID);
 
     // all framebuffers have the same attachment layout
@@ -1388,7 +1422,8 @@ void renderer_precompute_env_map_from_equirectangular(resource_env_map* env_map,
 
         backend->clear_viewport(0.0f, 0.0f, 0.0f, 0.0f);
 
-        backend->draw_geometry(&render_state->cube_geom);
+        backend->bind_geometry(&render_state->cube_geom);
+        backend->draw_indexed(render_state->cube_geom.num_inds, 0, 0);
     }
     backend->use_framebuffer(0);
 
@@ -1412,7 +1447,8 @@ void renderer_precompute_env_map_from_equirectangular(resource_env_map* env_map,
 
         backend->clear_viewport(0.0f, 0.0f, 0.0f, 0.0f);
 
-        backend->draw_geometry(&render_state->cube_geom);
+        backend->bind_geometry(&render_state->cube_geom);
+        backend->draw_indexed(render_state->cube_geom.num_inds, 0, 0);
     }
     backend->use_framebuffer(0);
 
@@ -1447,7 +1483,8 @@ void renderer_precompute_env_map_from_equirectangular(resource_env_map* env_map,
 
             backend->clear_viewport(0.0f, 0.0f, 0.0f, 0.0f);
 
-            backend->draw_geometry(&render_state->cube_geom);
+            backend->bind_geometry(&render_state->cube_geom);
+            backend->draw_indexed(render_state->cube_geom.num_inds, 0, 0);
         }
     }
     backend->resize_framebuffer_renderbuffer(&ibl_prefilter, PREFILTER_CUBE_MAP_SIZE, PREFILTER_CUBE_MAP_SIZE);

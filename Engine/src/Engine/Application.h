@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Defines.h"
+#include "Engine/Renderer/Render_Types.h"
 
 struct render_packet;
 
@@ -25,6 +26,7 @@ struct RohinAppConfig {
     uint64 requested_transient_memory;
 
     log_level app_log_level;
+    renderer_api_type backend_api;
 
     RohinAppArgs args;
 };

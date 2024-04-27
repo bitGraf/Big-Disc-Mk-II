@@ -26,7 +26,7 @@ struct platform_state;
 struct memory_arena;
 struct event_context;
 
-bool32 renderer_initialize(memory_arena* arena, const char* application_name, platform_state* plat_state);
+bool32 renderer_initialize(memory_arena* arena, renderer_api_type backend_type, const char* application_name, platform_state* plat_state);
 bool32 renderer_create_pipeline();
 void renderer_shutdown();
 
@@ -73,13 +73,6 @@ bool32 renderer_create_framebuffer_cube(frame_buffer* fbo,
                                         const frame_buffer_attachment* attachments,
                                         bool32 gen_mipmaps);
 void renderer_destroy_framebuffer(frame_buffer* fbo);
-
-void renderer_use_shader(shader* shader_prog);
-//void renderer_draw_geometry(render_geometry* geom);
-void renderer_draw_geometry(render_geometry* geom, uint32 start_idx, uint32 num_inds);
-void renderer_draw_geometry(render_geometry* geom, render_material* mat);
-void renderer_draw_geometry_lines(render_geometry* geom);
-void renderer_draw_geometry_points(render_geometry* geom);
 
 // get texture from gpu to cpu
 void renderer_get_texture_data(render_texture_2D   texture, void* data, int num_channels, bool is_hdr, uint32 mip);

@@ -8,7 +8,7 @@ struct mesh_file;
 /* Resource_Manager.cpp */
 bool32 resource_init(memory_arena* arena);
 void resource_shutdown();
-memory_arena* resource_get_arena(); // remove api for this
+RHAPI memory_arena* resource_get_arena(); // remove api for this
 RHAPI bool32 resource_load_debug_mesh_into_geometry(const char* resource_file_name, render_geometry* geom);
 RHAPI bool32 resource_load_debug_mesh_data(const char* resource_file_name, debug_geometry* geom);
 

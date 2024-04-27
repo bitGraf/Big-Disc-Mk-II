@@ -3,7 +3,9 @@
 #include "../Renderer_API.h"
 
 struct OpenGL_api final : public renderer_api {
-    bool32 initialize(const char* application_name, struct platform_state* plat_state) override final;
+    bool32 initialize(const char* application_name, 
+                      struct platform_state* plat_state,
+                      memory_arena* backend_storage) override final;
     void shutdown() override final;
 
     void resized(uint16 width, uint16 height) override final;
@@ -11,6 +13,9 @@ struct OpenGL_api final : public renderer_api {
     bool32 begin_frame(real32 delta_time) override final;
     bool32 end_frame(real32 delta_time) override final;
     bool32 present(uint32 sync_interval) override final;
+
+    uint32 get_batch_size() override final;
+    void set_batch_index(uint32 index) override final;
 
     void push_debug_group(const char* label) override final;
     void pop_debug_group() override final;
@@ -64,14 +69,20 @@ struct OpenGL_api final : public renderer_api {
     void copy_framebuffer_depthbuffer(frame_buffer * src, frame_buffer * dst) override final;
     void copy_framebuffer_stencilbuffer(frame_buffer * src, frame_buffer * dst) override final;
 
+    void create_render_pass(render_pass* pass, uint64 sz_per_pass, uint64 sz_per_obj) override final;
+    void begin_render_pass(render_pass* pass) override final;
+    void end_render_pass(render_pass* pass) override final;
+
     void use_shader(shader* shader_prog) override final;
     void use_framebuffer(frame_buffer *fbuffer) override final;
 
-    void draw_geometry(render_geometry* geom) override final;
-    void draw_geometry(render_geometry* geom, uint32 start_idx, uint32 num_inds) override final;
-    void draw_geometry(render_geometry* geom, render_material* mat) override final;
-    void draw_geometry_lines(render_geometry* geom) override final;
-    void draw_geometry_points(render_geometry* geom) override final;
+    void bind_geometry(render_geometry* geom) override final;
+
+    void draw(uint32 verts_per_instance, uint32 first_vertex) override final;
+    void draw_instanced(uint32 verts_per_instance, uint32 instance_count, uint32 first_vertex, uint32 first_instance) override final;
+
+    void draw_indexed(uint32 inds_per_instance, uint32 first_index, uint32 first_vertex) override final;
+    void draw_indexed_instanced(uint32 inds_per_instance, uint32 instance_count, uint32 first_index, uint32 first_vertex, uint32 first_instance) override final;
 
     void bind_texture_2D(render_texture_2D texture, uint32 slot) override final;
     void bind_texture_3D(render_texture_3D texture, uint32 slot) override final;

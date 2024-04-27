@@ -55,15 +55,32 @@ enum class render_stencil_op : uint8 {
     Invert
 };
 
+enum class Index_Buffer_Type : uint32 {
+    UInt16 = 0,
+    UInt32
+};
+
 // the actual geometry that the gpu holds onto
 // separately, a 'resource' will exist to 
 // represent an actual mesh.
 struct render_geometry {
-    uint32 handle; // handle to the gpu version of this data
+    // DirectX12 binds vertex buffers and index buffers directly no problem
+    // OpenGL needs a Vertex Array Object (VAO). We simply store the VAO handle
+    // In the Vertex Buffer handle, and let it handle that
+    struct _Vertex_Buffer {
+        uint64 handle;          // handle to the gpu version of this data
+        uint32 buffer_size;     // total buffer size, in bytes
+        uint32 buffer_stride;   // stide of buffer element, in bytes
+    } vertex_buffer;
+
+    struct _Index_Buffer {
+        uint64 handle;                // handle to the gpu version of this data
+        uint32 buffer_size;           // total buffer size, in bytes
+        Index_Buffer_Type index_type;   // index buffer type (16/32 uint)
+    } index_buffer;
 
     uint32 num_verts;
     uint32 num_inds;
-    uint32 flag;
 };
 
 struct render_texture_2D {
@@ -223,6 +240,13 @@ struct frame_buffer {
     frame_buffer_attachment attachments[6];
 };
 
+struct render_pass {
+    uint16 handle;
+
+    uint8* per_frame;
+    uint8* per_object;
+};
+
 struct render_command {
     laml::Mat4 model_matrix;
     render_geometry geom;
@@ -292,13 +316,18 @@ struct renderer_api {
     //struct platform_state* plat_state; // platform-specific state
     uint64 frame_number;
 
-    virtual bool32 initialize(const char* application_name, struct platform_state* plat_state) = 0;
+    virtual bool32 initialize(const char* application_name, 
+                              struct platform_state* plat_state,
+                              memory_arena* backend_storage) = 0;
     virtual void shutdown() = 0;
     virtual void resized(uint16 width, uint16 height) = 0;
 
     virtual bool32 begin_frame(real32 delta_time) = 0;
     virtual bool32 end_frame(real32 delta_time) = 0;
     virtual bool32 present(uint32 sync_interval) = 0;
+
+    virtual uint32 get_batch_size() = 0;
+    virtual void set_batch_index(uint32 index) = 0;
 
     virtual bool32 ImGui_Init() = 0;
     virtual bool32 ImGui_begin_frame() = 0;
@@ -336,6 +365,10 @@ struct renderer_api {
                              const ShaderDataType* attributes) = 0;
     virtual void destroy_mesh(render_geometry* mesh) = 0;
 
+    virtual void create_render_pass(render_pass* pass, uint64 sz_per_pass, uint64 sz_per_obj) = 0;
+    virtual void begin_render_pass(render_pass* pass) = 0;
+    virtual void end_render_pass(render_pass* pass) = 0;
+
     virtual bool32 create_shader(shader* shader_prog, const uint8* shader_source, uint64 num_bytes) = 0;
     virtual void destroy_shader(shader* shader_prog) = 0;
 
@@ -357,11 +390,13 @@ struct renderer_api {
     virtual void set_framebuffer_cube_face(frame_buffer* fbuffer, uint32 attach_idx, uint32 slot, uint32 mip_level) = 0;
     virtual void resize_framebuffer_renderbuffer(frame_buffer* fbuffer, uint32 new_width, uint32 new_height) = 0;
 
-    virtual void draw_geometry(render_geometry* geom) = 0;
-    virtual void draw_geometry(render_geometry* geom, uint32 start_idx, uint32 num_inds) = 0;
-    virtual void draw_geometry(render_geometry* geom, render_material* mat) = 0;
-    virtual void draw_geometry_lines( render_geometry* geom) = 0;
-    virtual void draw_geometry_points(render_geometry* geom) = 0;
+    virtual void bind_geometry(render_geometry* geom) = 0;
+
+    virtual void draw(uint32 verts_per_instance, uint32 first_vertex) = 0;
+    virtual void draw_instanced(uint32 verts_per_instance, uint32 instance_count, uint32 first_vertex, uint32 first_instance) = 0;
+
+    virtual void draw_indexed(uint32 inds_per_instance, uint32 first_index, uint32 first_vertex) = 0;
+    virtual void draw_indexed_instanced(uint32 inds_per_instance, uint32 instance_count, uint32 first_index, uint32 first_vertex, uint32 first_instance) = 0;
 
     virtual void bind_texture_2D(  render_texture_2D texture, uint32 slot) = 0;
     virtual void bind_texture_3D(  render_texture_3D texture, uint32 slot) = 0;

@@ -155,7 +155,7 @@ bool32 start_rohin_engine(RohinApp* app) {
     uint32 target_framerate = 60;
 
     // renderer startup
-    if (!renderer_initialize(&engine.engine_arena, config.application_name, nullptr)) {
+    if (!renderer_initialize(&engine.engine_arena, app->app_config.backend_api, config.application_name, nullptr)) {
         RH_FATAL("Failed to initialize renderer!");
         return false;
     }

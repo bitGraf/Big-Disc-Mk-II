@@ -1,8 +1,10 @@
 #include "DirectX12_API.h"
 
 #include "Engine/Core/Logger.h"
+#include "Engine/Core/String.h"
 #include "Engine/Core/Asserts.h"
 #include "Engine/Memory/Memory.h"
+#include "Engine/Memory/Memory_Arena.h"
 #include "Engine/Platform/Platform.h"
 
 #include <stdarg.h>
@@ -21,6 +23,8 @@
     #include "backends/imgui_impl_win32.h"
     #include "backends/imgui_impl_dx12.h"
 #endif
+
+#define BATCH_SIZE 1024
 
 struct DX12State {
     // DirectX 12 Objects
@@ -52,21 +56,6 @@ struct DX12State {
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>        Sam_DescriptorHeap;
     uint32                                              Sam_DescriptorSize;
 
-
-    // mesh and data
-    Microsoft::WRL::ComPtr<ID3D12Resource>              TriangleVBResource;
-    //Render_Geometry                                     Triangle;
-
-    Microsoft::WRL::ComPtr<ID3D12Resource>              ScreenVBResource;
-    //Render_Geometry                                     Screen;
-
-    // texture
-    Microsoft::WRL::ComPtr<ID3D12Resource>              TextureMetalResource;
-    //Renderer_Texture                                    TextureMetal;
-
-    Microsoft::WRL::ComPtr<ID3D12Resource>              TextureChainlinkResource;
-    //Renderer_Texture                                    TextureChainLink;
-
     // Frame Resources
     uint32                                              frame_idx;
     static const uint8                                  num_frames_in_flight = 3;
@@ -84,12 +73,48 @@ struct DX12State {
 
         uint64                                          FenceValue = 0;
     } frames[DX12State::num_frames_in_flight];
+
+    // storage for meshes/textures
+    memory_arena* backend_arena;
+
+    struct _Resource {
+        ID3D12Resource* gpu_resource;
+        uint8*          cpu_mapped;
+    };
+    struct _Resource_Storage {
+        uint16 next_handle = 1;
+        uint16 num_alloced = 0;
+        uint16 total_capacity;
+
+        _Resource* resources;
+    };
+
+    _Resource_Storage vertex_and_index_buffers;
+
+    // storage for render passes
+    struct _Render_Pass {
+        _Resource per_pass_buffer[DX12State::num_frames_in_flight];
+        _Resource per_obj_buffer[DX12State::num_frames_in_flight];
+        ID3D12PipelineState* pso;
+    };
+    struct _Render_Pass_Storage {
+        uint16 next_handle = 1;
+        uint16 num_alloced = 0;
+        uint16 total_capacity;
+
+        _Render_Pass* passes;
+    };
+    _Render_Pass_Storage render_passes;
+
+    uint32 recording = 0;
 };
 global_variable DX12State dx12;
 
 void FlushDirectQueue();
 
-bool32 DirectX12_api::initialize(const char* application_name, platform_state* plat_state) {
+bool32 DirectX12_api::initialize(const char* application_name, 
+                                 struct platform_state* plat_state,
+                                 memory_arena* backend_storage) {
     using namespace Microsoft::WRL;
 
     // Enable D3D12 debug layer
@@ -530,6 +555,20 @@ bool32 DirectX12_api::initialize(const char* application_name, platform_state* p
         FlushDirectQueue();
     }
 
+    dx12.backend_arena = backend_storage;
+
+    // Create Resource Storage
+    uint16 num_reserve = 256;
+    dx12.vertex_and_index_buffers.total_capacity = num_reserve;
+    dx12.vertex_and_index_buffers.resources = PushArray(dx12.backend_arena, DX12State::_Resource, num_reserve);
+    memory_zero(dx12.vertex_and_index_buffers.resources, num_reserve*sizeof(DX12State::_Resource));
+
+    // Create Render Pass Storage
+    num_reserve = 16;
+    dx12.render_passes.total_capacity = num_reserve;
+    dx12.render_passes.passes = PushArray(dx12.backend_arena, DX12State::_Render_Pass, num_reserve);
+    memory_zero(dx12.render_passes.passes, num_reserve*sizeof(DX12State::_Render_Pass));
+
     return true;
 }
 void DirectX12_api::shutdown() {
@@ -689,9 +728,13 @@ bool32 DirectX12_api::begin_frame(real32 delta_time) {
     allocator->Reset();
     dx12.CmdList->Reset(allocator.Get(), dx12.PSO_Standard.Get());
 
+    dx12.recording = true;
+
     return true;
 }
 bool32 DirectX12_api::end_frame(real32 delta_time) {
+    dx12.recording = false;
+
     auto backbuffer = dx12.frames[dx12.frame_idx].BackBuffer;
 
     CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -725,6 +768,13 @@ bool32 DirectX12_api::present(uint32 sync_interval) {
     dx12.frame_idx = dx12.SwapChain->GetCurrentBackBufferIndex();
 
     return true;
+}
+
+uint32 DirectX12_api::get_batch_size() {
+    return BATCH_SIZE;
+}
+void DirectX12_api::set_batch_index(uint32 index) {
+    //dx12.CmdList->SetGraphicsRoot32BitConstant(0, index, 0);
 }
 
 bool32 DirectX12_api::ImGui_Init() {
@@ -812,8 +862,15 @@ void DirectX12_api::set_stencil_op(render_stencil_op sfail, render_stencil_op dp
 }
 
 void DirectX12_api::push_debug_group(const char* label) {
+    if (dx12.recording) {
+        uint32 len = (uint32)string_length(label);
+        dx12.CmdList->BeginEvent(1, label, len + 1);
+    }
 }
 void DirectX12_api::pop_debug_group() {
+    if (dx12.recording) {
+        dx12.CmdList->EndEvent();
+    }
 }
 
 void DirectX12_api::create_texture_2D(struct render_texture_2D* texture, 
@@ -840,15 +897,157 @@ void DirectX12_api::destroy_texture_3D(struct render_texture_3D* texture) {
 void DirectX12_api::destroy_texture_cube(struct render_texture_cube* texture) {
 }
 
+internal_func bool IsIntegerType(ShaderDataType Type) {
+    switch (Type) {
+        case ShaderDataType::Int:    return true;
+        case ShaderDataType::Int2:   return true;
+        case ShaderDataType::Int3:   return true;
+        case ShaderDataType::Int4:   return true;
+
+        case ShaderDataType::Float:  return false;
+        case ShaderDataType::Float2: return false;
+        case ShaderDataType::Float3: return false;
+        case ShaderDataType::Float4: return false;
+        case ShaderDataType::Mat3:   return false;
+        case ShaderDataType::Mat4:   return false;
+        case ShaderDataType::Bool:   return false;
+    }
+
+    AssertMsg(false, "Invalid ShaderDataType");
+    return 0;
+}
+
+internal_func uint32 GetComponentCount(ShaderDataType Type) {
+    switch (Type) {
+        case ShaderDataType::Float:  return 1;
+        case ShaderDataType::Int:    return 1;
+        case ShaderDataType::Bool:   return 1;
+
+        case ShaderDataType::Float2: return 2;
+        case ShaderDataType::Int2:   return 2;
+
+        case ShaderDataType::Float3: return 3;
+        case ShaderDataType::Int3:   return 3;
+
+        case ShaderDataType::Float4: return 4;
+        case ShaderDataType::Int4:   return 4;
+
+        case ShaderDataType::Mat3:   return 3 * 3;
+        case ShaderDataType::Mat4:   return 4 * 4;
+    }
+
+    AssertMsg(false, "Invalid ShaderDataType");
+    return 0;
+}
+
+internal_func uint32 ShaderDataTypeSize(ShaderDataType Type) {
+    switch (Type) {
+        case ShaderDataType::Float:  return 4;
+        case ShaderDataType::Int:    return 4;
+        case ShaderDataType::Bool:   return 4;
+
+        case ShaderDataType::Float2: return 4 * 2;
+        case ShaderDataType::Int2:   return 4 * 2;
+
+        case ShaderDataType::Float3: return 4 * 3;
+        case ShaderDataType::Int3:   return 4 * 3;
+
+        case ShaderDataType::Float4: return 4 * 4;
+        case ShaderDataType::Int4:   return 4 * 4;
+
+        case ShaderDataType::Mat3:   return 4 * 3 * 3;
+        case ShaderDataType::Mat4:   return 4 * 4 * 4;
+    }
+
+    AssertMsg(false, "Invalid ShaderDataType");
+    return 0;
+}
+
+#define MAX_VERTEX_ATTRIBUTES 16
+
+struct vertex_layout {
+    uint32 stride;
+    uint32 num_attributes;
+};
+
+internal_func vertex_layout calculate_stride(const ShaderDataType* attributes) {
+    vertex_layout layout = {};
+    for (const ShaderDataType* scan = attributes; *scan != ShaderDataType::None; scan++) {
+        layout.num_attributes++;
+        AssertMsg(layout.num_attributes < MAX_VERTEX_ATTRIBUTES, "Too many vertex attributes!"); // just limit it to a reasonable amount now
+        layout.stride += ShaderDataTypeSize(*scan);
+    }
+    AssertMsg(layout.num_attributes > 0, "Zero vertex attributes assigned!");
+    return layout;
+}
 
 void DirectX12_api::create_mesh(render_geometry* mesh, 
-                             uint32 num_verts, const void* vertices,
-                             uint32 num_inds, const uint32* indices,
-                             const ShaderDataType* attributes) {
-    mesh->handle = 0;
-    mesh->num_inds = 0;
-    mesh->num_verts = 0;
-    mesh->flag = 0;
+                                uint32 num_verts, const void* vertices,
+                                uint32 num_inds, const uint32* indices,
+                                const ShaderDataType* attributes) {
+    // Handle this in an "immediate way"
+    // i.e. reset the command list, Buffer the data, then close and execute the command list.
+    // In the future can queue of uploads or even use a copy command queue?
+
+    // to be in the triangle_mesh struct
+    vertex_layout layout = calculate_stride(attributes);
+    bool32 normalized = false;
+
+    mesh->num_verts = num_verts;
+    mesh->num_inds = num_inds;
+
+    // TMP: for now, create everything in the upload buffer!
+
+    // first create the Vertex Buffer
+    uint16 handle = dx12.vertex_and_index_buffers.next_handle++;
+    dx12.vertex_and_index_buffers.num_alloced++;
+    AssertMsg(dx12.vertex_and_index_buffers.num_alloced < dx12.vertex_and_index_buffers.total_capacity, "Ran out of vertex/index buffer slots!");
+    DX12State::_Resource* vertex_buffer = &dx12.vertex_and_index_buffers.resources[handle];
+
+    const UINT vb_buf_size = num_verts * layout.stride;
+    D3D12_HEAP_PROPERTIES prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+    D3D12_RESOURCE_DESC   desc = CD3DX12_RESOURCE_DESC::Buffer(vb_buf_size);
+
+    dx12.Device->CreateCommittedResource(
+        &prop, D3D12_HEAP_FLAG_NONE,
+        &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr, IID_PPV_ARGS(&vertex_buffer->gpu_resource));
+
+    BYTE* mapped = nullptr;
+    vertex_buffer->gpu_resource->Map(0, nullptr, reinterpret_cast<void**>(&mapped));
+    memory_copy(mapped, vertices, vb_buf_size);
+    vertex_buffer->gpu_resource->Unmap(0, nullptr);
+    vertex_buffer->cpu_mapped = nullptr;
+
+    // create Index Buffer
+    handle = dx12.vertex_and_index_buffers.next_handle++;
+    dx12.vertex_and_index_buffers.num_alloced++;
+    AssertMsg(dx12.vertex_and_index_buffers.num_alloced < dx12.vertex_and_index_buffers.total_capacity, "Ran out of vertex/index buffer slots!");
+    DX12State::_Resource* index_buffer = &dx12.vertex_and_index_buffers.resources[handle];
+
+    const UINT ib_buf_size = num_verts * sizeof(uint32);
+    prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+    desc = CD3DX12_RESOURCE_DESC::Buffer(ib_buf_size);
+
+    dx12.Device->CreateCommittedResource(
+        &prop, D3D12_HEAP_FLAG_NONE,
+        &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr, IID_PPV_ARGS(&index_buffer->gpu_resource));
+
+    mapped = nullptr;
+    index_buffer->gpu_resource->Map(0, nullptr, reinterpret_cast<void**>(&mapped));
+    memory_copy(mapped, vertices, ib_buf_size);
+    index_buffer->gpu_resource->Unmap(0, nullptr);
+    index_buffer->cpu_mapped = nullptr;
+
+    // initialize the vertex buffer view.
+    mesh->vertex_buffer.handle = vertex_buffer->gpu_resource->GetGPUVirtualAddress();
+    mesh->vertex_buffer.buffer_size = vb_buf_size;
+    mesh->vertex_buffer.buffer_stride = layout.stride;
+
+    mesh->index_buffer.handle = index_buffer->gpu_resource->GetGPUVirtualAddress();
+    mesh->index_buffer.buffer_size = ib_buf_size;
+    mesh->index_buffer.index_type = Index_Buffer_Type::UInt32;
 }
 void DirectX12_api::destroy_mesh(render_geometry* mesh) {
 }
@@ -896,21 +1095,93 @@ void DirectX12_api::copy_framebuffer_depthbuffer(frame_buffer * src, frame_buffe
 void DirectX12_api::copy_framebuffer_stencilbuffer(frame_buffer * src, frame_buffer * dst) {
 }
 
+void DirectX12_api::create_render_pass(render_pass* pass, uint64 sz_per_pass, uint64 sz_per_obj) {
+    // Get a handle to new pass in pass_storage
+    uint16 handle = dx12.render_passes.next_handle++;
+    dx12.render_passes.num_alloced++;
+    AssertMsg(dx12.render_passes.num_alloced < dx12.render_passes.total_capacity, "Ran out of render pass slots!");
+    DX12State::_Render_Pass* _pass = &dx12.render_passes.passes[handle];
+
+    for (uint16 n = 0; n < dx12.num_frames_in_flight; n++) {
+        // Per Frame Constant Buffer
+        uint64 cbSize = (sz_per_pass + 255) & ~255; // make it a multiple of 256, minimum alloc size
+
+        auto prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+        auto desc = CD3DX12_RESOURCE_DESC::Buffer(cbSize);
+        dx12.Device->CreateCommittedResource(&prop, D3D12_HEAP_FLAG_NONE,
+                                             &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+                                             nullptr, IID_PPV_ARGS(&_pass->per_pass_buffer[n].gpu_resource));
+        _pass->per_pass_buffer[n].gpu_resource->Map(0, nullptr,  (void**)(&_pass->per_pass_buffer[n].cpu_mapped));
+
+        // Per Object Constant Buffer
+        cbSize = (sz_per_pass + 255) & ~255; // make it a multiple of 256, minimum alloc size
+
+        prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+        desc = CD3DX12_RESOURCE_DESC::Buffer(cbSize);
+        dx12.Device->CreateCommittedResource(&prop, D3D12_HEAP_FLAG_NONE,
+                                             &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+                                             nullptr, IID_PPV_ARGS(&_pass->per_obj_buffer[n].gpu_resource));
+        _pass->per_obj_buffer[n].gpu_resource->Map(0, nullptr,  (void**)(&_pass->per_obj_buffer[n].cpu_mapped));
+    }
+
+    pass->handle = handle;
+    pass->per_frame = nullptr;
+    pass->per_object = nullptr;
+}
+void DirectX12_api::begin_render_pass(render_pass* pass) {
+    AssertMsg(!(pass->per_frame || pass->per_object), "Buffers still mapped. Did you forget to end_render_pass()?");
+
+    //DX12State::_Render_Pass* _pass = dx12.render_passes.passes[pass->handle];
+
+    pass->per_frame  = dx12.render_passes.passes[pass->handle].per_pass_buffer[dx12.frame_idx].cpu_mapped;
+    pass->per_object = dx12.render_passes.passes[pass->handle].per_obj_buffer[dx12.frame_idx].cpu_mapped;
+}
+void DirectX12_api::end_render_pass(render_pass* pass) {
+    AssertMsg((pass->per_frame && pass->per_object), "Buffers not mapped. Did you forget to begin_render_pass()?");
+
+    pass->per_frame  = nullptr;
+    pass->per_object = nullptr;
+}
 
 void DirectX12_api::use_shader(shader* shader_prog) {
 }
 void DirectX12_api::use_framebuffer(frame_buffer* fbuffer) {
 }
 
-void DirectX12_api::draw_geometry(render_geometry* geom) {
+void DirectX12_api::bind_geometry(render_geometry* geom) {
+    D3D12_VERTEX_BUFFER_VIEW vbv;
+    vbv.BufferLocation = geom->vertex_buffer.handle;
+    vbv.SizeInBytes    = geom->vertex_buffer.buffer_size;
+    vbv.StrideInBytes  = geom->vertex_buffer.buffer_stride;
+
+    dx12.CmdList->IASetVertexBuffers(0, 1, &vbv);
+
+    D3D12_INDEX_BUFFER_VIEW ibv;
+    ibv.BufferLocation = geom->index_buffer.handle;
+    ibv.SizeInBytes    = geom->index_buffer.buffer_size;
+    switch (geom->index_buffer.index_type) {
+        case Index_Buffer_Type::UInt16: ibv.Format = DXGI_FORMAT_R16_UINT; break;
+        case Index_Buffer_Type::UInt32: ibv.Format = DXGI_FORMAT_R32_UINT; break;
+    }
+
+    dx12.CmdList->IASetIndexBuffer(&ibv);
 }
-void DirectX12_api::draw_geometry(render_geometry* geom, uint32 start_idx, uint32 num_inds) {
+
+void DirectX12_api::draw(uint32 verts_per_instance, uint32 first_vertex) {
+    //dx12.CmdList->DrawInstanced(verts_per_instance, 1, first_vertex, 0);
 }
-void DirectX12_api::draw_geometry(render_geometry* geom, render_material* mat) {
+void DirectX12_api::draw_instanced(uint32 verts_per_instance, uint32 instance_count,
+                                uint32 first_vertex, uint32 first_instance) {
+    //dx12.CmdList->DrawInstanced(verts_per_instance, instance_count, first_vertex, first_instance);
 }
-void DirectX12_api::draw_geometry_lines(render_geometry* geom) {
+
+void DirectX12_api::draw_indexed(uint32 inds_per_instance, uint32 first_index, uint32 first_vertex) {
+    //dx12.CmdList->DrawIndexedInstanced(inds_per_instance, 1, first_index, first_vertex, 0);
 }
-void DirectX12_api::draw_geometry_points(render_geometry* geom) {
+void DirectX12_api::draw_indexed_instanced(uint32 inds_per_instance, uint32 instance_count, 
+                                        uint32 first_index, uint32 first_vertex, 
+                                        uint32 first_instance) {
+    //dx12.CmdList->DrawIndexedInstanced(inds_per_instance, instance_count, first_index, first_vertex, first_instance);
 }
 
 void DirectX12_api::bind_texture_2D(render_texture_2D texture, uint32 slot) {

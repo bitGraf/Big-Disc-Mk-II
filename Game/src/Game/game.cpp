@@ -19,6 +19,9 @@
 
 #include <Engine/Debug_UI/Debug_UI.h>
 
+#include <Engine/Platform/Platform.h>
+#include <Engine/Resources/Filetype/dds_file_reader.h>
+
 struct game_state {
     memory_arena arena;
 
@@ -36,6 +39,29 @@ void init_game(game_state* state, game_memory* memory) {
     ////////////////////////////////////////
     RH_WARN("entity_static: %llu bytes", sizeof(entity_static));
     ///////////////////////////////////////
+
+    //
+    char full_path[256];
+    platform_get_full_resource_path(full_path, 256, "Data/textures/metal.dds");
+
+    RH_TRACE("Full filename: [%s]", full_path);
+
+    file_handle file = platform_read_entire_file(full_path);
+    if (!file.num_bytes) {
+        RH_ERROR("Failed to read resource file");
+        return;
+    }
+
+    memory_arena* arena = resource_get_arena();
+
+    int x,y,n;
+    unsigned char *bitmap = dds_load_from_memory(file.data, (int)file.num_bytes, &x, &y, &n, 0);
+    platform_free_file_data(&file);
+    if (bitmap == NULL) {
+        RH_ERROR("Failed to load image file!");
+        //return;
+    }
+    //
 
     memory_index offset = sizeof(game_state);
     CreateArena(&state->arena, memory->GameStorageSize-offset, (uint8*)(memory->GameStorage)+offset);
