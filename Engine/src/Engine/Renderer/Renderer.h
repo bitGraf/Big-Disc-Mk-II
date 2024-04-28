@@ -29,6 +29,7 @@ struct event_context;
 bool32 renderer_initialize(memory_arena* arena, renderer_api_type backend_type, const char* application_name, platform_state* plat_state);
 bool32 renderer_create_pipeline();
 void renderer_shutdown();
+renderer_api_type renderer_backend_type();
 
 void renderer_present();
 

@@ -38,6 +38,7 @@ struct simple_per_object_constants {
 struct renderer_state {
     uint32 render_width;
     uint32 render_height;
+    renderer_api_type backend_type;
 
     resource_texture_2D   white_tex;
     resource_texture_2D   black_tex;
@@ -110,6 +111,8 @@ bool32 renderer_initialize(memory_arena* arena, renderer_api_type backend_type, 
     render_state->tone_map = true;
     render_state->use_skins = true;
     render_state->visualize_maps = false;
+
+    render_state->backend_type = backend_type;
 
     return true;
 }
@@ -224,17 +227,17 @@ bool32 renderer_create_pipeline() {
     time_point simple_pipeline_start = start_timer();
     backend->push_debug_group("Create Simple Pipeline");
 
-    backend->create_render_pass(&render_state->simple_pass, 
-                                sizeof(simple_per_pass_constants), 
-                                sizeof(simple_per_object_constants));
-
     // setup simple shader
-    shader* pSimple = (shader*)(&render_state->simple_shader);
     shader_simple& simple = render_state->simple_shader;
+    shader* pSimple = (shader*)(&render_state->simple_shader);
     if (!resource_load_shader_file("Data/Shaders/simple.glsl", pSimple)) {
         RH_FATAL("Could not setup the main shader");
         return false;
     }
+    backend->create_render_pass(&render_state->simple_pass, pSimple, 
+                                sizeof(simple_per_pass_constants), 
+                                sizeof(simple_per_object_constants));
+
     backend->use_shader(pSimple);
 
     simple.InitShaderLocs();
@@ -452,19 +455,19 @@ bool32 renderer_create_pipeline() {
 #endif
     // setup skybox shader
     shader *pSkybox = (shader*)(&render_state->skybox_shader);
-    if (!resource_load_shader_file("Data/Shaders/Skybox.glsl", pSkybox)) {
-        RH_FATAL("Could not setup the skybox shader");
-        return false;
-    }
+    //if (!resource_load_shader_file("Data/Shaders/Skybox.glsl", pSkybox)) {
+    //    RH_FATAL("Could not setup the skybox shader");
+    //    return false;
+    //}
     backend->use_shader(pSkybox);
     render_state->skybox_shader.InitShaderLocs();
     backend->upload_uniform_int(render_state->skybox_shader.u_skybox, render_state->skybox_shader.u_skybox.SamplerID);
 
     // setup wireframe shader
-    if (!resource_load_shader_file("Data/Shaders/wireframe.glsl", &render_state->wireframe_shader)) {
-        RH_FATAL("Could not setup the wireframe shader");
-        return false;
-    }
+    //if (!resource_load_shader_file("Data/Shaders/wireframe.glsl", &render_state->wireframe_shader)) {
+    //    RH_FATAL("Could not setup the wireframe shader");
+    //    return false;
+    //}
     backend->use_shader(&render_state->wireframe_shader);
 
     resource_load_debug_mesh_into_geometry("Data/Models/debug/gizmo.stl", &render_state->axis_geom);
@@ -521,6 +524,9 @@ void renderer_shutdown() {
     backend->shutdown();
     renderer_api_destroy(backend);
     backend = 0;
+}
+renderer_api_type renderer_backend_type() {
+    return render_state->backend_type;
 }
 
 bool32 renderer_begin_Frame(real32 delta_time) {

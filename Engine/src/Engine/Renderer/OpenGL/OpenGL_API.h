@@ -69,7 +69,8 @@ struct OpenGL_api final : public renderer_api {
     void copy_framebuffer_depthbuffer(frame_buffer * src, frame_buffer * dst) override final;
     void copy_framebuffer_stencilbuffer(frame_buffer * src, frame_buffer * dst) override final;
 
-    void create_render_pass(render_pass* pass, uint64 sz_per_pass, uint64 sz_per_obj) override final;
+    void create_render_pass(render_pass* pass, shader* pass_shader,
+                            uint64 sz_per_pass, uint64 sz_per_obj) override final;
     void begin_render_pass(render_pass* pass) override final;
     void end_render_pass(render_pass* pass) override final;
 

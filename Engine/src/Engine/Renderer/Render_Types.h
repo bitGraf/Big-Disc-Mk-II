@@ -365,7 +365,8 @@ struct renderer_api {
                              const ShaderDataType* attributes) = 0;
     virtual void destroy_mesh(render_geometry* mesh) = 0;
 
-    virtual void create_render_pass(render_pass* pass, uint64 sz_per_pass, uint64 sz_per_obj) = 0;
+    virtual void create_render_pass(render_pass* pass, shader* pass_shader,
+                                    uint64 sz_per_pass, uint64 sz_per_obj) = 0;
     virtual void begin_render_pass(render_pass* pass) = 0;
     virtual void end_render_pass(render_pass* pass) = 0;
 

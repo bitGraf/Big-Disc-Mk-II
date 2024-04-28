@@ -25,6 +25,7 @@
 #endif
 
 #define BATCH_SIZE 1024
+#define BATCH_SIZE_STR "1024"
 
 struct DX12State {
     // DirectX 12 Objects
@@ -35,9 +36,9 @@ struct DX12State {
 
     Microsoft::WRL::ComPtr<IDXGISwapChain4>             SwapChain;
     Microsoft::WRL::ComPtr<ID3D12Resource>              DepthStencilBuffer;
-    Microsoft::WRL::ComPtr<ID3D12RootSignature>         RootSignature;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState>         PSO_Standard;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState>         PSO_Blend;
+    //Microsoft::WRL::ComPtr<ID3D12RootSignature>         RootSignature;
+    //Microsoft::WRL::ComPtr<ID3D12PipelineState>         PSO_Standard;
+    //Microsoft::WRL::ComPtr<ID3D12PipelineState>         PSO_Blend;
     uint32                                              backbuffer_width  = 100;
     uint32                                              backbuffer_height = 100;
 
@@ -64,12 +65,6 @@ struct DX12State {
     struct FrameResources {
         Microsoft::WRL::ComPtr<ID3D12Resource>          BackBuffer;
         Microsoft::WRL::ComPtr<ID3D12CommandAllocator>  CommandAllocator;
-        
-        Microsoft::WRL::ComPtr<ID3D12Resource>          upload_cbuffer_PerFrame;
-        BYTE*                                           upload_cbuffer_PerFrame_mapped = nullptr;
-
-        Microsoft::WRL::ComPtr<ID3D12Resource>          upload_cbuffer_PerModel;
-        BYTE*                                           upload_cbuffer_PerModel_mapped = nullptr;
 
         uint64                                          FenceValue = 0;
     } frames[DX12State::num_frames_in_flight];
@@ -95,7 +90,9 @@ struct DX12State {
     struct _Render_Pass {
         _Resource per_pass_buffer[DX12State::num_frames_in_flight];
         _Resource per_obj_buffer[DX12State::num_frames_in_flight];
+
         ID3D12PipelineState* pso;
+        ID3D12RootSignature* root_sig;
     };
     struct _Render_Pass_Storage {
         uint16 next_handle = 1;
@@ -105,6 +102,20 @@ struct DX12State {
         _Render_Pass* passes;
     };
     _Render_Pass_Storage render_passes;
+
+    // storage for shaders
+    struct _Shader {
+        ID3DBlob* vs_bytecode;
+        ID3DBlob* ps_bytecode;
+    };
+    struct _Shader_Storage {
+        uint16 next_handle = 1;
+        uint16 num_alloced = 0;
+        uint16 total_capacity;
+
+        _Shader* shaders;
+    };
+    _Shader_Storage shaders;
 
     uint32 recording = 0;
 };
@@ -569,6 +580,12 @@ bool32 DirectX12_api::initialize(const char* application_name,
     dx12.render_passes.passes = PushArray(dx12.backend_arena, DX12State::_Render_Pass, num_reserve);
     memory_zero(dx12.render_passes.passes, num_reserve*sizeof(DX12State::_Render_Pass));
 
+    // Create Shader Storage
+    num_reserve = 16;
+    dx12.shaders.total_capacity = num_reserve;
+    dx12.shaders.shaders = PushArray(dx12.backend_arena, DX12State::_Shader, num_reserve);
+    memory_zero(dx12.shaders.shaders, num_reserve*sizeof(DX12State::_Shader));
+
     return true;
 }
 void DirectX12_api::shutdown() {
@@ -726,7 +743,7 @@ bool32 DirectX12_api::begin_frame(real32 delta_time) {
     auto backbuffer = dx12.frames[dx12.frame_idx].BackBuffer;
 
     allocator->Reset();
-    dx12.CmdList->Reset(allocator.Get(), dx12.PSO_Standard.Get());
+    dx12.CmdList->Reset(allocator.Get(), nullptr);
 
     dx12.recording = true;
 
@@ -774,7 +791,7 @@ uint32 DirectX12_api::get_batch_size() {
     return BATCH_SIZE;
 }
 void DirectX12_api::set_batch_index(uint32 index) {
-    //dx12.CmdList->SetGraphicsRoot32BitConstant(0, index, 0);
+    dx12.CmdList->SetGraphicsRoot32BitConstant(0, index, 0);
 }
 
 bool32 DirectX12_api::ImGui_Init() {
@@ -1025,7 +1042,7 @@ void DirectX12_api::create_mesh(render_geometry* mesh,
     AssertMsg(dx12.vertex_and_index_buffers.num_alloced < dx12.vertex_and_index_buffers.total_capacity, "Ran out of vertex/index buffer slots!");
     DX12State::_Resource* index_buffer = &dx12.vertex_and_index_buffers.resources[handle];
 
-    const UINT ib_buf_size = num_verts * sizeof(uint32);
+    const UINT ib_buf_size = num_inds * sizeof(uint32);
     prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     desc = CD3DX12_RESOURCE_DESC::Buffer(ib_buf_size);
 
@@ -1036,7 +1053,7 @@ void DirectX12_api::create_mesh(render_geometry* mesh,
 
     mapped = nullptr;
     index_buffer->gpu_resource->Map(0, nullptr, reinterpret_cast<void**>(&mapped));
-    memory_copy(mapped, vertices, ib_buf_size);
+    memory_copy(mapped, indices, ib_buf_size);
     index_buffer->gpu_resource->Unmap(0, nullptr);
     index_buffer->cpu_mapped = nullptr;
 
@@ -1053,7 +1070,55 @@ void DirectX12_api::destroy_mesh(render_geometry* mesh) {
 }
 
 bool32 DirectX12_api::create_shader(shader* shader_prog, const uint8* shader_source, uint64 num_bytes) {
-    shader_prog->handle = 0;
+    // set shader compile definitions:
+    // #define BATCH_AMOUNT 1024
+    D3D_SHADER_MACRO shader_defines[] = {
+        { "BATCH_AMOUNT", BATCH_SIZE_STR },
+        {  NULL,           NULL}
+    };
+
+    RH_DEBUG("Shader defines: %d", _countof(shader_defines)-1);
+    for (uint32 n = 0; n < _countof(shader_defines)-1; n++) {
+        RH_DEBUG("  '%s' = '%s'", shader_defines[n].Name, shader_defines[n].Definition);
+    }
+
+    // Create a new shader handle
+    uint16 handle = dx12.shaders.next_handle++;
+    dx12.shaders.num_alloced++;
+    AssertMsg(dx12.shaders.num_alloced < dx12.shaders.total_capacity, "Ran out of shader slots!");
+    DX12State::_Shader* _shader = &dx12.shaders.shaders[handle];
+
+    // compile shaders
+    {
+        Microsoft::WRL::ComPtr<ID3DBlob> vs_errors;
+
+        if FAILED(D3DCompile(shader_source, num_bytes,
+                            "ShaderVS",
+                            shader_defines, nullptr,
+                            "VS", "vs_5_1",
+                            D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION, 0,
+                            &_shader->vs_bytecode, &vs_errors)) {
+            RH_FATAL("Failed to compile vertex shader");
+            RH_FATAL("Errors: %s", (char*)vs_errors->GetBufferPointer());
+            return false;
+        }
+    }
+
+    {
+        Microsoft::WRL::ComPtr<ID3DBlob> ps_errors;
+        if FAILED(D3DCompile(shader_source, num_bytes,
+                             "ShaderPS",
+                             shader_defines, nullptr,
+                             "PS", "ps_5_1",
+                             D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION, 0,
+                             &_shader->ps_bytecode, &ps_errors)) {
+            RH_FATAL("Failed to compile pixel shader");
+            RH_FATAL("Errors: %s", (char*)ps_errors->GetBufferPointer());
+            return false;
+        }
+    }
+
+    shader_prog->handle = handle;
 
     return true;
 }
@@ -1095,13 +1160,15 @@ void DirectX12_api::copy_framebuffer_depthbuffer(frame_buffer * src, frame_buffe
 void DirectX12_api::copy_framebuffer_stencilbuffer(frame_buffer * src, frame_buffer * dst) {
 }
 
-void DirectX12_api::create_render_pass(render_pass* pass, uint64 sz_per_pass, uint64 sz_per_obj) {
+void DirectX12_api::create_render_pass(render_pass* pass, shader* pass_shader,
+                                       uint64 sz_per_pass, uint64 sz_per_obj) {
     // Get a handle to new pass in pass_storage
     uint16 handle = dx12.render_passes.next_handle++;
     dx12.render_passes.num_alloced++;
     AssertMsg(dx12.render_passes.num_alloced < dx12.render_passes.total_capacity, "Ran out of render pass slots!");
     DX12State::_Render_Pass* _pass = &dx12.render_passes.passes[handle];
 
+    // Create constant buffers
     for (uint16 n = 0; n < dx12.num_frames_in_flight; n++) {
         // Per Frame Constant Buffer
         uint64 cbSize = (sz_per_pass + 255) & ~255; // make it a multiple of 256, minimum alloc size
@@ -1114,7 +1181,7 @@ void DirectX12_api::create_render_pass(render_pass* pass, uint64 sz_per_pass, ui
         _pass->per_pass_buffer[n].gpu_resource->Map(0, nullptr,  (void**)(&_pass->per_pass_buffer[n].cpu_mapped));
 
         // Per Object Constant Buffer
-        cbSize = (sz_per_pass + 255) & ~255; // make it a multiple of 256, minimum alloc size
+        cbSize = ((sz_per_obj*BATCH_SIZE) + 255) & ~255; // make it a multiple of 256, minimum alloc size
 
         prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
         desc = CD3DX12_RESOURCE_DESC::Buffer(cbSize);
@@ -1122,6 +1189,120 @@ void DirectX12_api::create_render_pass(render_pass* pass, uint64 sz_per_pass, ui
                                              &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
                                              nullptr, IID_PPV_ARGS(&_pass->per_obj_buffer[n].gpu_resource));
         _pass->per_obj_buffer[n].gpu_resource->Map(0, nullptr,  (void**)(&_pass->per_obj_buffer[n].cpu_mapped));
+    }
+
+    // vertex input description
+    D3D12_INPUT_ELEMENT_DESC vert_desc[] = {
+        { "POSITION",  0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0,  D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "NORMAL",    0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "TANGENT",   0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "BITANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD",  0, DXGI_FORMAT_R32G32_FLOAT,    0, 48, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+    };
+
+    // create root signature
+    {
+        D3D12_ROOT_PARAMETER root_parameters[3];
+        
+        // Root Constants
+        root_parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        root_parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        root_parameters[0].Constants.ShaderRegister = 0;
+        root_parameters[0].Constants.RegisterSpace  = 0;
+        root_parameters[0].Constants.Num32BitValues = 4;
+
+        // Per Object Buffer
+        root_parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        root_parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+        root_parameters[1].Descriptor.ShaderRegister = 1;
+        root_parameters[1].Descriptor.RegisterSpace  = 0;
+
+        // Per Frame Buffer
+        root_parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        root_parameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+        root_parameters[2].Descriptor.ShaderRegister = 2;
+        root_parameters[2].Descriptor.RegisterSpace  = 0;
+
+        // Textures
+        //D3D12_DESCRIPTOR_RANGE srv_range = {};
+        //srv_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        //srv_range.BaseShaderRegister = 0;
+        //srv_range.NumDescriptors = 1;
+        //srv_range.RegisterSpace = 0;
+        //srv_range.OffsetInDescriptorsFromTableStart = 0;
+        //root_parameters[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        //root_parameters[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        //root_parameters[3].DescriptorTable.NumDescriptorRanges = 1;
+        //root_parameters[3].DescriptorTable.pDescriptorRanges = &srv_range;
+
+        // Samplers
+        //D3D12_DESCRIPTOR_RANGE sampler_range = {};
+        //sampler_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+        //sampler_range.BaseShaderRegister = 0;
+        //sampler_range.NumDescriptors = 1;
+        //sampler_range.RegisterSpace = 0;
+        //sampler_range.OffsetInDescriptorsFromTableStart = 0;
+        //root_parameters[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        //root_parameters[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        //root_parameters[4].DescriptorTable.NumDescriptorRanges = 1;
+        //root_parameters[4].DescriptorTable.pDescriptorRanges = &sampler_range;
+
+        CD3DX12_ROOT_SIGNATURE_DESC root_sig_desc(_countof(root_parameters), root_parameters, 
+                                                  0, nullptr, // static samplers
+                                                  D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+
+        Microsoft::WRL::ComPtr<ID3DBlob> serialized_root_sig = nullptr;
+        Microsoft::WRL::ComPtr<ID3DBlob> error_blob          = nullptr;
+        if FAILED(D3D12SerializeRootSignature(&root_sig_desc,
+                                              D3D_ROOT_SIGNATURE_VERSION_1_0,
+                                              serialized_root_sig.GetAddressOf(),
+                                              error_blob.GetAddressOf())) {
+            RH_FATAL("Could not serialize root signature");
+            RH_FATAL("DxError: %s", error_blob->GetBufferPointer());
+            return;
+        }
+
+        if FAILED(dx12.Device->CreateRootSignature(0,
+                                                   serialized_root_sig->GetBufferPointer(),
+                                                   serialized_root_sig->GetBufferSize(),
+                                                   IID_PPV_ARGS(&_pass->root_sig))) {
+            RH_FATAL("Could not create root signature");
+            return;
+        }
+    }
+
+    DX12State::_Shader* _shader = &dx12.shaders.shaders[pass_shader->handle];
+
+    // Create Pipeline state object (PSO)
+    {
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
+
+        desc.pRootSignature = _pass->root_sig;
+        desc.VS.pShaderBytecode = _shader->vs_bytecode->GetBufferPointer();
+        desc.VS.BytecodeLength  = _shader->vs_bytecode->GetBufferSize();
+        desc.PS.pShaderBytecode = _shader->ps_bytecode->GetBufferPointer();
+        desc.PS.BytecodeLength  = _shader->ps_bytecode->GetBufferSize();
+
+        desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+        desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT); 
+
+        desc.SampleMask = UINT_MAX;
+        desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+        desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+        desc.InputLayout.pInputElementDescs = vert_desc;
+        desc.InputLayout.NumElements = 5;
+        desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        desc.NumRenderTargets = 1;
+        desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
+        desc.SampleDesc.Count = 1;
+        desc.SampleDesc.Quality = 0;
+
+        // create the pso
+        if FAILED(dx12.Device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_pass->pso))) {
+            RH_FATAL("Failed to create PSO");
+            return;
+        }
     }
 
     pass->handle = handle;
@@ -1135,6 +1316,16 @@ void DirectX12_api::begin_render_pass(render_pass* pass) {
 
     pass->per_frame  = dx12.render_passes.passes[pass->handle].per_pass_buffer[dx12.frame_idx].cpu_mapped;
     pass->per_object = dx12.render_passes.passes[pass->handle].per_obj_buffer[dx12.frame_idx].cpu_mapped;
+
+    dx12.CmdList->SetPipelineState(dx12.render_passes.passes[pass->handle].pso);
+    dx12.CmdList->SetGraphicsRootSignature(dx12.render_passes.passes[pass->handle].root_sig);
+    dx12.CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    // [1] - Per-Model Root Descriptor
+    dx12.CmdList->SetGraphicsRootConstantBufferView(1, dx12.render_passes.passes[pass->handle].per_obj_buffer[dx12.frame_idx].gpu_resource->GetGPUVirtualAddress());
+
+    // [2] - Per-Frame Root Descriptor
+    dx12.CmdList->SetGraphicsRootConstantBufferView(2, dx12.render_passes.passes[pass->handle].per_pass_buffer[dx12.frame_idx].gpu_resource->GetGPUVirtualAddress());
 }
 void DirectX12_api::end_render_pass(render_pass* pass) {
     AssertMsg((pass->per_frame && pass->per_object), "Buffers not mapped. Did you forget to begin_render_pass()?");
@@ -1168,20 +1359,20 @@ void DirectX12_api::bind_geometry(render_geometry* geom) {
 }
 
 void DirectX12_api::draw(uint32 verts_per_instance, uint32 first_vertex) {
-    //dx12.CmdList->DrawInstanced(verts_per_instance, 1, first_vertex, 0);
+    dx12.CmdList->DrawInstanced(verts_per_instance, 1, first_vertex, 0);
 }
 void DirectX12_api::draw_instanced(uint32 verts_per_instance, uint32 instance_count,
                                 uint32 first_vertex, uint32 first_instance) {
-    //dx12.CmdList->DrawInstanced(verts_per_instance, instance_count, first_vertex, first_instance);
+    dx12.CmdList->DrawInstanced(verts_per_instance, instance_count, first_vertex, first_instance);
 }
 
 void DirectX12_api::draw_indexed(uint32 inds_per_instance, uint32 first_index, uint32 first_vertex) {
-    //dx12.CmdList->DrawIndexedInstanced(inds_per_instance, 1, first_index, first_vertex, 0);
+    dx12.CmdList->DrawIndexedInstanced(inds_per_instance, 1, first_index, first_vertex, 0);
 }
 void DirectX12_api::draw_indexed_instanced(uint32 inds_per_instance, uint32 instance_count, 
                                         uint32 first_index, uint32 first_vertex, 
                                         uint32 first_instance) {
-    //dx12.CmdList->DrawIndexedInstanced(inds_per_instance, instance_count, first_index, first_vertex, first_instance);
+    dx12.CmdList->DrawIndexedInstanced(inds_per_instance, instance_count, first_index, first_vertex, first_instance);
 }
 
 void DirectX12_api::bind_texture_2D(render_texture_2D texture, uint32 slot) {

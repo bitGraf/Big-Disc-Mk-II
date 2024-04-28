@@ -10,7 +10,13 @@ bool32 resource_load_shader_file(const char* resource_file_name,
                                  shader* shader_prog) {
 
     char full_path[256];
-    platform_get_full_resource_path(full_path, 256, resource_file_name);
+    uint64 len = platform_get_full_resource_path(full_path, 256, resource_file_name);
+
+    renderer_api_type backend_type = renderer_backend_type();
+    switch (backend_type) {
+        case RENDERER_API_OPENGL:     full_path[len-4] = 'g'; break;
+        case RENDERER_API_DIRECTX_12: full_path[len-4] = 'h'; break;
+    }
 
     RH_TRACE("Full filename: [%s]", full_path);
 

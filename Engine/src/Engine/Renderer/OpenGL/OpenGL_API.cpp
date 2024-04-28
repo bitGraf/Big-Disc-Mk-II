@@ -981,7 +981,8 @@ void OpenGL_api::copy_framebuffer_stencilbuffer(frame_buffer * src, frame_buffer
     }
 }
 
-void OpenGL_api::create_render_pass(render_pass* pass, uint64 sz_per_pass, uint64 sz_per_obj) {
+void OpenGL_api::create_render_pass(render_pass* pass, shader* pass_shader,
+                                    uint64 sz_per_pass, uint64 sz_per_obj) {
     pass->per_frame  = (uint8*)PushSize_(OpenGL.backend_storage, sz_per_pass);
     pass->per_object = (uint8*)PushSize_(OpenGL.backend_storage, sz_per_obj*get_batch_size());
 }
