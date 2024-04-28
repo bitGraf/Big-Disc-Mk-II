@@ -15,7 +15,7 @@ struct DirectX12_api final : public renderer_api {
     bool32 present(uint32 sync_interval) override final;
 
     uint32 get_batch_size() override final;
-    void set_batch_index(uint32 index) override final;
+    void set_batch_index(render_pass* pass, uint32 index) override final;
 
     void push_debug_group(const char* label) override final;
     void pop_debug_group() override final;

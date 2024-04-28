@@ -343,10 +343,6 @@ bool32 game_update_and_render(RohinApp* app, render_packet* packet, real32 delta
                 // copy resource_material to render_material
                 copy_material(&cmd.material, &mesh->materials[p]);
 
-                // tmp! bloon color
-                if (entity.color.x >= 0.0f)
-                    cmd.material.DiffuseFactor = entity.color;
-
                 cmd.skeleton_idx = 0;
 
                 command_idx++;

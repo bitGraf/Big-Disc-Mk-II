@@ -327,7 +327,7 @@ struct renderer_api {
     virtual bool32 present(uint32 sync_interval) = 0;
 
     virtual uint32 get_batch_size() = 0;
-    virtual void set_batch_index(uint32 index) = 0;
+    virtual void set_batch_index(render_pass* pass, uint32 index) = 0;
 
     virtual bool32 ImGui_Init() = 0;
     virtual bool32 ImGui_begin_frame() = 0;

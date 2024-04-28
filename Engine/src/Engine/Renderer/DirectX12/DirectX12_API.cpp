@@ -59,7 +59,7 @@ struct DX12State {
 
     // Frame Resources
     uint32                                              frame_idx;
-    static const uint8                                  num_frames_in_flight = 3;
+    static const uint8                                  num_frames_in_flight = 15;
     Microsoft::WRL::ComPtr<ID3D12Fence>                 Fence;
     uint64                                              CurrentFence = 0;
     struct FrameResources {
@@ -90,9 +90,11 @@ struct DX12State {
     struct _Render_Pass {
         _Resource per_pass_buffer[DX12State::num_frames_in_flight];
         _Resource per_obj_buffer[DX12State::num_frames_in_flight];
+        ID3D12DescriptorHeap* CBV_Heap[DX12State::num_frames_in_flight];
 
         ID3D12PipelineState* pso;
         ID3D12RootSignature* root_sig;
+        uint64 per_obj_stride;
     };
     struct _Render_Pass_Storage {
         uint16 next_handle = 1;
@@ -745,6 +747,22 @@ bool32 DirectX12_api::begin_frame(real32 delta_time) {
     allocator->Reset();
     dx12.CmdList->Reset(allocator.Get(), nullptr);
 
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtv(dx12.RTV_DescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+                                      dx12.frame_idx, dx12.RTV_DescriptorSize);
+    CD3DX12_CPU_DESCRIPTOR_HANDLE dsv(dx12.DSV_DescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+
+    // clear render target
+    {
+        // transition the backbuffer into render target
+        CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+            backbuffer.Get(),
+            D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+        dx12.CmdList->ResourceBarrier(1, &barrier);
+        // specify render target to use
+        dx12.CmdList->OMSetRenderTargets(1, &rtv, true, &dsv);
+    }
+
     dx12.recording = true;
 
     return true;
@@ -790,8 +808,17 @@ bool32 DirectX12_api::present(uint32 sync_interval) {
 uint32 DirectX12_api::get_batch_size() {
     return BATCH_SIZE;
 }
-void DirectX12_api::set_batch_index(uint32 index) {
-    dx12.CmdList->SetGraphicsRoot32BitConstant(0, index, 0);
+void DirectX12_api::set_batch_index(render_pass* pass, uint32 index) {
+    DX12State::_Render_Pass* _pass = &dx12.render_passes.passes[pass->handle];
+    //dx12.CmdList->SetGraphicsRoot32BitConstant(0, index, 0);
+
+    // [1] - Per-Model Root Descriptor
+    //dx12.CmdList->SetGraphicsRootConstantBufferView(1, dx12.render_passes.passes[pass->handle].per_obj_buffer[dx12.frame_idx].gpu_resource->GetGPUVirtualAddress());
+    CD3DX12_GPU_DESCRIPTOR_HANDLE cbv(_pass->CBV_Heap[dx12.frame_idx]->GetGPUDescriptorHandleForHeapStart(),
+                                      index, dx12.CBV_SRV_UAV_DescriptorSize);
+    dx12.CmdList->SetGraphicsRootDescriptorTable(1, cbv);
+
+    pass->per_object = _pass->per_obj_buffer[dx12.frame_idx].cpu_mapped + index*_pass->per_obj_stride;
 }
 
 bool32 DirectX12_api::ImGui_Init() {
@@ -1170,6 +1197,21 @@ void DirectX12_api::create_render_pass(render_pass* pass, shader* pass_shader,
 
     // Create constant buffers
     for (uint16 n = 0; n < dx12.num_frames_in_flight; n++) {
+        // each frame has its own descriptor heap?
+        {
+            D3D12_DESCRIPTOR_HEAP_DESC desc = {};
+            desc.NumDescriptors = BATCH_SIZE; // todo: how big?
+            desc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+            desc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+            desc.NodeMask       = 0;
+
+            if FAILED(dx12.Device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&_pass->CBV_Heap[n]))) {
+                RH_FATAL("Failed making descriptor heap");
+                return;
+            }
+        }
+
+
         // Per Frame Constant Buffer
         uint64 cbSize = (sz_per_pass + 255) & ~255; // make it a multiple of 256, minimum alloc size
 
@@ -1181,13 +1223,25 @@ void DirectX12_api::create_render_pass(render_pass* pass, shader* pass_shader,
         _pass->per_pass_buffer[n].gpu_resource->Map(0, nullptr,  (void**)(&_pass->per_pass_buffer[n].cpu_mapped));
 
         // Per Object Constant Buffer
-        cbSize = ((sz_per_obj*BATCH_SIZE) + 255) & ~255; // make it a multiple of 256, minimum alloc size
+        cbSize = (sz_per_obj + 255) & ~255; // make it a multiple of 256, minimum alloc size
+        _pass->per_obj_stride = cbSize;
 
         prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-        desc = CD3DX12_RESOURCE_DESC::Buffer(cbSize);
+        desc = CD3DX12_RESOURCE_DESC::Buffer(cbSize*BATCH_SIZE);
         dx12.Device->CreateCommittedResource(&prop, D3D12_HEAP_FLAG_NONE,
                                              &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
                                              nullptr, IID_PPV_ARGS(&_pass->per_obj_buffer[n].gpu_resource));
+
+        for (uint16 b = 0; b < BATCH_SIZE; b++) {
+            D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc;
+            cbv_desc.BufferLocation = _pass->per_obj_buffer[n].gpu_resource->GetGPUVirtualAddress() + cbSize*b;
+            cbv_desc.SizeInBytes = (uint32)cbSize;
+
+            CD3DX12_CPU_DESCRIPTOR_HANDLE heap(_pass->CBV_Heap[n]->GetCPUDescriptorHandleForHeapStart(),
+                                               b, dx12.CBV_SRV_UAV_DescriptorSize);
+            dx12.Device->CreateConstantBufferView(&cbv_desc, heap);
+        }
+
         _pass->per_obj_buffer[n].gpu_resource->Map(0, nullptr,  (void**)(&_pass->per_obj_buffer[n].cpu_mapped));
     }
 
@@ -1211,11 +1265,21 @@ void DirectX12_api::create_render_pass(render_pass* pass, shader* pass_shader,
         root_parameters[0].Constants.RegisterSpace  = 0;
         root_parameters[0].Constants.Num32BitValues = 4;
 
-        // Per Object Buffer
-        root_parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-        root_parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
-        root_parameters[1].Descriptor.ShaderRegister = 1;
-        root_parameters[1].Descriptor.RegisterSpace  = 0;
+        // Per Object Buffer - descriptor table
+        //root_parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        //root_parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+        //root_parameters[1].Descriptor.ShaderRegister = 1;
+        //root_parameters[1].Descriptor.RegisterSpace  = 0;
+        D3D12_DESCRIPTOR_RANGE per_obj_range = {};
+        per_obj_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+        per_obj_range.BaseShaderRegister = 1;
+        per_obj_range.NumDescriptors = 1;
+        per_obj_range.RegisterSpace = 0;
+        per_obj_range.OffsetInDescriptorsFromTableStart = 0;
+        root_parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        root_parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+        root_parameters[1].DescriptorTable.NumDescriptorRanges = 1;
+        root_parameters[1].DescriptorTable.pDescriptorRanges = &per_obj_range;
 
         // Per Frame Buffer
         root_parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
@@ -1321,8 +1385,10 @@ void DirectX12_api::begin_render_pass(render_pass* pass) {
     dx12.CmdList->SetGraphicsRootSignature(dx12.render_passes.passes[pass->handle].root_sig);
     dx12.CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    // [1] - Per-Model Root Descriptor
-    dx12.CmdList->SetGraphicsRootConstantBufferView(1, dx12.render_passes.passes[pass->handle].per_obj_buffer[dx12.frame_idx].gpu_resource->GetGPUVirtualAddress());
+    ID3D12DescriptorHeap* heaps[] = {
+        dx12.render_passes.passes[pass->handle].CBV_Heap[dx12.frame_idx]
+    };
+    dx12.CmdList->SetDescriptorHeaps(_countof(heaps), heaps);
 
     // [2] - Per-Frame Root Descriptor
     dx12.CmdList->SetGraphicsRootConstantBufferView(2, dx12.render_passes.passes[pass->handle].per_pass_buffer[dx12.frame_idx].gpu_resource->GetGPUVirtualAddress());
@@ -1424,22 +1490,12 @@ void DirectX12_api::clear_viewport(real32 r, real32 g, real32 b, real32 a) {
 
     // clear render target
     {
-        // transition the backbuffer into render target
-        CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-            backbuffer.Get(),
-            D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-        dx12.CmdList->ResourceBarrier(1, &barrier);
-
         // clear the color buffer
         FLOAT color[] = { 0.4f, 0.6f, 0.9f, 1.0f }; // cornflower blue
         dx12.CmdList->ClearRenderTargetView(rtv, color, 0, nullptr);
 
         // clear the depth/stencil buffer
         dx12.CmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0, nullptr);
-
-        // specify render target to use
-        dx12.CmdList->OMSetRenderTargets(1, &rtv, true, &dsv);
     }
 }
 void DirectX12_api::clear_viewport_only_color(real32 r, real32 g, real32 b, real32 a) {

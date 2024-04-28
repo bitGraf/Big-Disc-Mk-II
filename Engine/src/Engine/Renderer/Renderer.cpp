@@ -28,7 +28,6 @@
 
 struct simple_per_pass_constants {
     laml::Mat4 proj_view;
-    laml::Vec3 color;
 };
 struct simple_per_object_constants {
     laml::Mat4 r_Transform;
@@ -596,7 +595,6 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
 
         simple_per_pass_constants* per_frame = (simple_per_pass_constants*)render_state->simple_pass.per_frame;
         per_frame->proj_view = laml::mul(packet->projection_matrix, packet->view_matrix);
-        per_frame->color = laml::Vec3(1.0f, 1.0f, 1.0f);
 
         // draw world axis
         //renderer_upload_uniform_float4x4(&render_state->simple_shader, "r_Transform", 
@@ -607,13 +605,15 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         //backend->set_stencil_mask(0xFF);
         //backend->set_stencil_func(render_stencil_func::Always, 100, 0xFF);
         //backend->set_stencil_op(render_stencil_op::Keep, render_stencil_op::Keep, render_stencil_op::Replace);
-        simple_per_object_constants* per_object = (simple_per_object_constants*)render_state->simple_pass.per_object;
         for (uint32 cmd_index = 0; cmd_index < packet->num_commands; cmd_index++) {
             render_command& cmd = packet->commands[cmd_index];
             render_material& mat = cmd.material;
 
-            per_object[cmd_index].r_Transform = cmd.model_matrix;
-            per_object[cmd_index].u_color = mat.DiffuseFactor;
+            backend->set_batch_index(&render_state->simple_pass, cmd_index);
+            simple_per_object_constants* per_object = (simple_per_object_constants*)render_state->simple_pass.per_object;
+
+            per_object->r_Transform = cmd.model_matrix;
+            per_object->u_color     = mat.DiffuseFactor;
 
             //backend->upload_uniform_float4x4(simple.r_Transform, cmd.model_matrix);
             //backend->upload_uniform_float3(simple.u_color, mat.DiffuseFactor);
@@ -624,7 +624,6 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
             //    backend->bind_texture_2D(render_state->white_tex.texture, 0);
             //}
 
-            backend->set_batch_index(cmd_index);
             backend->bind_geometry(&cmd.geom);
             backend->draw_indexed(cmd.geom.num_inds, 0, 0);
         }

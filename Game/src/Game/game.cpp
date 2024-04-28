@@ -92,8 +92,18 @@ void init_game(game_state* state, game_memory* memory) {
     resource_load_static_mesh("Data/Models/plane.mesh", mesh);
     mesh->materials[0].RoughnessFactor = 0.95f; // todo: pull materials out of mesh file? make it a separate thing entirely?
     mesh->materials[0].MetallicFactor = 0.0f;
+    mesh->materials[0].DiffuseFactor = laml::Vec3(0.4f, 1.0f, 0.4f);
     entity_static* floor = create_static_entity(&state->scene, "floor", mesh);
     floor->color = laml::Vec3(1.0f);
+
+    resource_static_mesh* mesh2 = PushStruct(&state->arena, resource_static_mesh);
+    resource_load_static_mesh("Data/Models/box.mesh", mesh2);
+    mesh2->materials[0].RoughnessFactor = 0.95f; // todo: pull materials out of mesh file? make it a separate thing entirely?
+    mesh2->materials[0].MetallicFactor = 0.0f;
+    //mesh2->materials[0].DiffuseFactor = laml::Vec3(1.0f, 0.0f, 0.0f);
+    entity_static* box = create_static_entity(&state->scene, "box", mesh2);
+    box->color = laml::Vec3(1.0f);
+    box->position = laml::Vec3(0.0f, 2.0f, 0.0f);
 
     RH_INFO("Scene created. %d Static entities. %d Skinned entities.",
             GetArrayCount(state->scene.static_entities),
