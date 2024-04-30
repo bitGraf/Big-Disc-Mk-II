@@ -32,7 +32,7 @@ bool32 resource_load_texture_file(const char* resource_file_name,
     // TODO: This calls malloc under the hood!
     //       can be overwritten with #define STBI_MALLOC ...
     int x,y,n;
-    unsigned char *bitmap = stbi_load_from_memory(file.data, (int)file.num_bytes, &x, &y, &n, 0);
+    unsigned char *bitmap = stbi_load_from_memory(file.data, (int)file.num_bytes, &x, &y, &n, 4);
     platform_free_file_data(&file);
     if (bitmap == NULL) {
         RH_ERROR("Failed to load image file!");

@@ -156,7 +156,7 @@ uint32 OpenGL_api::get_batch_size() {
     return 1024;
 }
 
-void OpenGL_api::set_batch_index(render_pass* pass, uint32 index) {
+void OpenGL_api::start_draw_call(render_pass* pass, uint32 index) {
 }
 
 bool32 OpenGL_api::ImGui_Init() {

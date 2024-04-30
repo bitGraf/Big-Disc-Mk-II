@@ -16,8 +16,8 @@ cbuffer cbPerFrame : register(b2) {
     float4x4 r_VP;
 };
 
-//Texture2D    tex_map : register(t0);
-//SamplerState sam     : register(s0);
+Texture2D    tex_map : register(t0);
+SamplerState sam     : register(s0);
 
 struct VertexIn
 {
@@ -73,7 +73,8 @@ float4 sRGB_float4(float4 v) {
 
 float4 PS(VertexOut pin) : SV_Target
 {
-    //float4 tex_color = tex_map.Sample(sam, pin.TexCoord);
+    float4 tex_color = float4(1.0f, 1.0f, 1.0f, 1.0f); 
+    tex_color = tex_map.Sample(sam, pin.TexCoord);
     //clip(tex_color.a - 0.5f);
     //tex_color = sRGB_float4(tex_color);
     //return pin.Color * tex_color;
@@ -83,5 +84,8 @@ float4 PS(VertexOut pin) : SV_Target
     //return float4(mix_color.rgb, mix_color.a*alpha);
     //return float4(per_obj[batch_idx].u_color, 1.0f);
     //return float4(1.0, 0.5, 0.3, 1.0f);
-    return float4(u_color * dot(pin.Norm, float3(0.0f, 1.0f, 1.0f)), 1.0f);
+    //return float4(u_color * dot(pin.Norm, float3(0.0f, 1.0f, 1.0f)), 1.0f);
+    //return float4(u_color, 1.0f);
+    return float4(u_color, 1.0f) * tex_color;
+    //return float4(pin.TexCoord, 1.0f, 1.0f) * tex_color;
 }

@@ -27,6 +27,19 @@
 #define BATCH_SIZE 1024
 #define BATCH_SIZE_STR "1024"
 
+#define TEXTURE_SLOTS 7
+
+/* Staging Heap Layout:
+ * for each object getting renderered:
+ *   [0]   Per-Object Constant Buffer (CBV)
+ *   [1-7] 7 Texture Slots Per Object
+ * Overall stagind heap looks like: 
+ *   CTTTTTTTTCTTTTTTTTCTTTTTTTTCTTTTTTTT...
+ * for drawing several items. The staging heap is then bound 
+ * at the start of a section for a draw call.
+ * each backbuffer will need its own copy of the staging buffer now.
+ */
+
 struct DX12State {
     // DirectX 12 Objects
     Microsoft::WRL::ComPtr<ID3D12Device5>               Device;
@@ -49,8 +62,8 @@ struct DX12State {
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>        DSV_DescriptorHeap;
     uint32                                              DSV_DescriptorSize;
 
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>        CBV_SRV_UAV_DescriptorHeap;
     uint32                                              CBV_SRV_UAV_DescriptorSize;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>        CBV_SRV_UAV_DescriptorHeap;
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>        imgui_heap;
 
@@ -59,12 +72,15 @@ struct DX12State {
 
     // Frame Resources
     uint32                                              frame_idx;
-    static const uint8                                  num_frames_in_flight = 15;
+    static const uint8                                  num_frames_in_flight = 3;
     Microsoft::WRL::ComPtr<ID3D12Fence>                 Fence;
     uint64                                              CurrentFence = 0;
     struct FrameResources {
         Microsoft::WRL::ComPtr<ID3D12Resource>          BackBuffer;
         Microsoft::WRL::ComPtr<ID3D12CommandAllocator>  CommandAllocator;
+
+        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>    Staging_Heap;
+        uint32                                          Staging_Offset = 0;
 
         uint64                                          FenceValue = 0;
     } frames[DX12State::num_frames_in_flight];
@@ -74,6 +90,7 @@ struct DX12State {
 
     struct _Resource {
         ID3D12Resource* gpu_resource;
+        ID3D12Resource* gpu_upload_buffer;
         uint8*          cpu_mapped;
     };
     struct _Resource_Storage {
@@ -85,6 +102,7 @@ struct DX12State {
     };
 
     _Resource_Storage vertex_and_index_buffers;
+    _Resource_Storage textures;
 
     // storage for render passes
     struct _Render_Pass {
@@ -118,6 +136,10 @@ struct DX12State {
         _Shader* shaders;
     };
     _Shader_Storage shaders;
+
+    struct _Framebuffer {
+
+    };
 
     uint32 recording = 0;
 };
@@ -407,6 +429,7 @@ bool32 DirectX12_api::initialize(const char* application_name,
             RH_FATAL("Failed making descriptor heap");
             return false;
         }
+        dx12.RTV_DescriptorHeap->SetName(L"Heap: RTV");
     }
     { // DSV
         D3D12_DESCRIPTOR_HEAP_DESC desc = {};
@@ -419,18 +442,20 @@ bool32 DirectX12_api::initialize(const char* application_name,
             RH_FATAL("Failed making descriptor heap");
             return false;
         }
+        dx12.DSV_DescriptorHeap->SetName(L"Heap: DSV");
     }
     { // CBV/SRV/UAV
         D3D12_DESCRIPTOR_HEAP_DESC desc = {};
         desc.NumDescriptors = 1000;
         desc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        desc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        desc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
         desc.NodeMask       = 0;
 
         if FAILED(dx12.Device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&dx12.CBV_SRV_UAV_DescriptorHeap))) {
             RH_FATAL("Failed making descriptor heap");
             return false;
         }
+        dx12.CBV_SRV_UAV_DescriptorHeap->SetName(L"Heap: Textures");
     }
     { // Samplers
         D3D12_DESCRIPTOR_HEAP_DESC desc = {};
@@ -443,6 +468,38 @@ bool32 DirectX12_api::initialize(const char* application_name,
             RH_FATAL("Failed making descriptor heap");
             return false;
         }
+        dx12.Sam_DescriptorHeap->SetName(L"Heap: Samplers");
+    }
+    // stagind heaps
+    for (uint32 n = 0; n < dx12.num_frames_in_flight; n++) {
+        // CBV/SRV/UAV - Staging heap
+        D3D12_DESCRIPTOR_HEAP_DESC desc = {};
+        desc.NumDescriptors = static_cast<UINT>(BATCH_SIZE);
+        desc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        desc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        desc.NodeMask       = 0;
+
+        if FAILED(dx12.Device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&dx12.frames[n].Staging_Heap))) {
+            RH_FATAL("Failed making descriptor heap");
+            return false;
+        }
+        dx12.frames[n].Staging_Heap->SetName(L"Heap: Staging");
+    }
+
+    // create basic sampler
+    {
+        D3D12_SAMPLER_DESC sdesc = {};
+        sdesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        sdesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        sdesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        sdesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        sdesc.MinLOD = 0;
+        sdesc.MaxLOD = D3D12_FLOAT32_MAX;
+        sdesc.MipLODBias = 0.0f;
+        sdesc.MaxAnisotropy = 1;
+        sdesc.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+
+        dx12.Device->CreateSampler(&sdesc, dx12.Sam_DescriptorHeap->GetCPUDescriptorHandleForHeapStart());
     }
 
     // setup back buffers
@@ -570,11 +627,17 @@ bool32 DirectX12_api::initialize(const char* application_name,
 
     dx12.backend_arena = backend_storage;
 
-    // Create Resource Storage
+    // Create Vetex/Index Buffer Storage
     uint16 num_reserve = 256;
     dx12.vertex_and_index_buffers.total_capacity = num_reserve;
     dx12.vertex_and_index_buffers.resources = PushArray(dx12.backend_arena, DX12State::_Resource, num_reserve);
     memory_zero(dx12.vertex_and_index_buffers.resources, num_reserve*sizeof(DX12State::_Resource));
+
+    // Create Texture Storage
+    num_reserve = 256;
+    dx12.textures.total_capacity = num_reserve;
+    dx12.textures.resources = PushArray(dx12.backend_arena, DX12State::_Resource, num_reserve);
+    memory_zero(dx12.textures.resources, num_reserve*sizeof(DX12State::_Resource));
 
     // Create Render Pass Storage
     num_reserve = 16;
@@ -808,15 +871,30 @@ bool32 DirectX12_api::present(uint32 sync_interval) {
 uint32 DirectX12_api::get_batch_size() {
     return BATCH_SIZE;
 }
-void DirectX12_api::set_batch_index(render_pass* pass, uint32 index) {
+void DirectX12_api::start_draw_call(render_pass* pass, uint32 index) {
     DX12State::_Render_Pass* _pass = &dx12.render_passes.passes[pass->handle];
     //dx12.CmdList->SetGraphicsRoot32BitConstant(0, index, 0);
 
     // [1] - Per-Model Root Descriptor
-    //dx12.CmdList->SetGraphicsRootConstantBufferView(1, dx12.render_passes.passes[pass->handle].per_obj_buffer[dx12.frame_idx].gpu_resource->GetGPUVirtualAddress());
-    CD3DX12_GPU_DESCRIPTOR_HANDLE cbv(_pass->CBV_Heap[dx12.frame_idx]->GetGPUDescriptorHandleForHeapStart(),
-                                      index, dx12.CBV_SRV_UAV_DescriptorSize);
+    uint32 stg_slot = index * (TEXTURE_SLOTS + 1);
+    dx12.frames[dx12.frame_idx].Staging_Offset = stg_slot;
+    D3D12_CPU_DESCRIPTOR_HANDLE dst_range = CD3DX12_CPU_DESCRIPTOR_HANDLE(dx12.frames[dx12.frame_idx].Staging_Heap->GetCPUDescriptorHandleForHeapStart(),
+                                                                          stg_slot, dx12.CBV_SRV_UAV_DescriptorSize);
+    uint32 cbv_slot = index;
+    D3D12_CPU_DESCRIPTOR_HANDLE src_range = CD3DX12_CPU_DESCRIPTOR_HANDLE(_pass->CBV_Heap[dx12.frame_idx]->GetCPUDescriptorHandleForHeapStart(),
+                                                                          cbv_slot, dx12.CBV_SRV_UAV_DescriptorSize);
+
+    dx12.Device->CopyDescriptorsSimple(1, dst_range, src_range, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    // [1] - Per-Object CBV
+    CD3DX12_GPU_DESCRIPTOR_HANDLE cbv(dx12.frames[dx12.frame_idx].Staging_Heap->GetGPUDescriptorHandleForHeapStart(),
+                                      stg_slot, dx12.CBV_SRV_UAV_DescriptorSize);
     dx12.CmdList->SetGraphicsRootDescriptorTable(1, cbv);
+
+    // [3] - Texture Descriptor Heap
+    CD3DX12_GPU_DESCRIPTOR_HANDLE srv(dx12.frames[dx12.frame_idx].Staging_Heap->GetGPUDescriptorHandleForHeapStart(),
+                                      stg_slot+1, dx12.CBV_SRV_UAV_DescriptorSize);
+    dx12.CmdList->SetGraphicsRootDescriptorTable(3, srv);
 
     pass->per_object = _pass->per_obj_buffer[dx12.frame_idx].cpu_mapped + index*_pass->per_obj_stride;
 }
@@ -917,10 +995,139 @@ void DirectX12_api::pop_debug_group() {
     }
 }
 
+DXGI_FORMAT DXGIFormat_from_CreateInfo(texture_creation_info_2D create_info, bool32 is_hdr) {
+    if (is_hdr) {
+        switch (create_info.num_channels) {
+            case 1: return DXGI_FORMAT_R32_FLOAT;
+            case 2: return DXGI_FORMAT_R32G32_FLOAT;
+            case 3: return DXGI_FORMAT_R32G32B32_FLOAT;
+            case 4: return DXGI_FORMAT_R32G32B32A32_FLOAT;
+
+            default: return DXGI_FORMAT_UNKNOWN;
+        }
+    } else {
+        switch (create_info.num_channels) {
+            case 1: return DXGI_FORMAT_R8_UNORM;
+            case 2: return DXGI_FORMAT_R8G8_UNORM;
+            case 4: return DXGI_FORMAT_R8G8B8A8_UNORM;
+
+            default: return DXGI_FORMAT_UNKNOWN;
+        }
+    }
+}
+
 void DirectX12_api::create_texture_2D(struct render_texture_2D* texture, 
                                    texture_creation_info_2D create_info, 
                                    const void* data, bool32 is_hdr) {
-    texture->handle = 0;
+    // first create the resource handle
+    uint16 handle = dx12.textures.next_handle++;
+    dx12.textures.num_alloced++;
+    AssertMsg(dx12.textures.num_alloced < dx12.textures.total_capacity, "Ran out of texture slots!");
+    DX12State::_Resource* _texture = &dx12.textures.resources[handle];
+
+    const uint64 bytes_per_pixel = create_info.num_channels * (is_hdr ? 4 : 1);
+    //const uint64 uploadBufferSize = create_info.width * create_info.height * bytes_per_pixel;
+    DXGI_FORMAT format = DXGIFormat_from_CreateInfo(create_info, is_hdr); /*DXGI_FORMAT_BC3_UNORM*/;
+
+    // create resource in DEFAULT_HEAP
+    auto prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    auto desc = CD3DX12_RESOURCE_DESC::Tex2D(format, create_info.width, create_info.height);
+    dx12.Device->CreateCommittedResource(
+        &prop, D3D12_HEAP_FLAG_NONE,
+        &desc, D3D12_RESOURCE_STATE_COMMON,
+        nullptr, IID_PPV_ARGS(&_texture->gpu_resource));
+    _texture->gpu_resource->SetName(L"texture.......");
+
+    const uint64 uploadBufferSize = GetRequiredIntermediateSize(_texture->gpu_resource, 0, 1);
+
+    // create upload_buffer in UPLOAD_HEAP
+    prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+    desc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
+    dx12.Device->CreateCommittedResource(
+        &prop, D3D12_HEAP_FLAG_NONE,
+        &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr, IID_PPV_ARGS(&_texture->gpu_upload_buffer));
+
+    _texture->gpu_upload_buffer->Map(0, nullptr, (void**)&_texture->cpu_mapped);
+    memory_copy(_texture->cpu_mapped, data, uploadBufferSize);
+    _texture->gpu_upload_buffer->Unmap(0, nullptr);
+
+    // schedule the copy from UPLOAD to DEFAULT
+    dx12.frames[dx12.frame_idx].CommandAllocator->Reset();
+    dx12.CmdList->Reset(dx12.frames[dx12.frame_idx].CommandAllocator.Get(), nullptr);
+    const char* label = "Uploading Texture";
+    uint32 len = (uint32)string_length(label);
+    dx12.CmdList->BeginEvent(1, label, len + 1);
+
+    D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(_texture->gpu_resource, 
+                                                                          D3D12_RESOURCE_STATE_COMMON, 
+                                                                          D3D12_RESOURCE_STATE_COPY_DEST);
+    dx12.CmdList->ResourceBarrier(1, &barrier);
+
+    uint64 rowBytes = (uint64(create_info.width) * bytes_per_pixel*8u + 7u) / 8u; // round up to nearest byte
+    uint64 numBytes = rowBytes * create_info.height;
+
+    D3D12_SUBRESOURCE_DATA sub;
+    sub.pData      = data;
+    sub.RowPitch   = rowBytes;
+    sub.SlicePitch = numBytes;
+
+    #if 1
+    if (0 == UpdateSubresources(dx12.CmdList.Get(),           // cmdList
+                                _texture->gpu_resource,       // Destination
+                                _texture->gpu_upload_buffer,  // Intermediate
+                                0,                            // IntermediateOffset
+                                0,                            // FirstSubresource
+                                1,                            // NumSubresources
+                                &sub))                        // Subresources
+    {
+        RH_ERROR("Failed on UpdateSubresources");
+    }
+    #else
+    const CD3DX12_TEXTURE_COPY_LOCATION Dst(_texture->gpu_resource, 0);
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT src_footprint;
+    src_footprint.Offset = 0;
+    src_footprint.Footprint.Format = format;
+    src_footprint.Footprint.Width = create_info.width;
+    src_footprint.Footprint.Height = create_info.height;
+    src_footprint.Footprint.Depth = 1;
+    src_footprint.Footprint.RowPitch = (uint32)rowBytes;
+    const CD3DX12_TEXTURE_COPY_LOCATION Src(_texture->gpu_upload_buffer, src_footprint);
+    dx12.CmdList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
+    #endif
+
+    barrier = CD3DX12_RESOURCE_BARRIER::Transition(_texture->gpu_resource,
+                                                   D3D12_RESOURCE_STATE_COPY_DEST,
+                                                   D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    dx12.CmdList->ResourceBarrier(1, &barrier);
+
+    dx12.CmdList->EndEvent();
+
+    if FAILED(dx12.CmdList->Close()) {
+        RH_FATAL("Failed to close command list");
+    }
+    ID3D12CommandList* cmdsLists[] = { dx12.CmdList.Get() };
+    dx12.CommandQueue->ExecuteCommandLists(_countof(cmdsLists), cmdsLists);
+
+    FlushDirectQueue();
+    
+    // create SRV descriptors
+    CD3DX12_CPU_DESCRIPTOR_HANDLE hdesc(dx12.CBV_SRV_UAV_DescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+                                        handle, dx12.CBV_SRV_UAV_DescriptorSize);
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+    srv_desc.Format = format;
+    srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+    srv_desc.Texture2D.MostDetailedMip = 0;
+    srv_desc.Texture2D.MipLevels = 1;
+    srv_desc.Texture2D.PlaneSlice = 0;
+    srv_desc.Texture2D.ResourceMinLODClamp = 0.0;
+
+    dx12.Device->CreateShaderResourceView(_texture->gpu_resource, &srv_desc, hdesc);
+
+    texture->handle = handle;
 }
 void DirectX12_api::create_texture_cube(struct render_texture_cube* texture,
                                      texture_creation_info_cube create_info, 
@@ -1055,12 +1262,12 @@ void DirectX12_api::create_mesh(render_geometry* mesh,
     dx12.Device->CreateCommittedResource(
         &prop, D3D12_HEAP_FLAG_NONE,
         &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr, IID_PPV_ARGS(&vertex_buffer->gpu_resource));
+        nullptr, IID_PPV_ARGS(&vertex_buffer->gpu_upload_buffer));
 
     BYTE* mapped = nullptr;
-    vertex_buffer->gpu_resource->Map(0, nullptr, reinterpret_cast<void**>(&mapped));
+    vertex_buffer->gpu_upload_buffer->Map(0, nullptr, reinterpret_cast<void**>(&mapped));
     memory_copy(mapped, vertices, vb_buf_size);
-    vertex_buffer->gpu_resource->Unmap(0, nullptr);
+    vertex_buffer->gpu_upload_buffer->Unmap(0, nullptr);
     vertex_buffer->cpu_mapped = nullptr;
 
     // create Index Buffer
@@ -1076,20 +1283,20 @@ void DirectX12_api::create_mesh(render_geometry* mesh,
     dx12.Device->CreateCommittedResource(
         &prop, D3D12_HEAP_FLAG_NONE,
         &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr, IID_PPV_ARGS(&index_buffer->gpu_resource));
+        nullptr, IID_PPV_ARGS(&index_buffer->gpu_upload_buffer));
 
     mapped = nullptr;
-    index_buffer->gpu_resource->Map(0, nullptr, reinterpret_cast<void**>(&mapped));
+    index_buffer->gpu_upload_buffer->Map(0, nullptr, reinterpret_cast<void**>(&mapped));
     memory_copy(mapped, indices, ib_buf_size);
-    index_buffer->gpu_resource->Unmap(0, nullptr);
+    index_buffer->gpu_upload_buffer->Unmap(0, nullptr);
     index_buffer->cpu_mapped = nullptr;
 
     // initialize the vertex buffer view.
-    mesh->vertex_buffer.handle = vertex_buffer->gpu_resource->GetGPUVirtualAddress();
+    mesh->vertex_buffer.handle = vertex_buffer->gpu_upload_buffer->GetGPUVirtualAddress();
     mesh->vertex_buffer.buffer_size = vb_buf_size;
     mesh->vertex_buffer.buffer_stride = layout.stride;
 
-    mesh->index_buffer.handle = index_buffer->gpu_resource->GetGPUVirtualAddress();
+    mesh->index_buffer.handle = index_buffer->gpu_upload_buffer->GetGPUVirtualAddress();
     mesh->index_buffer.buffer_size = ib_buf_size;
     mesh->index_buffer.index_type = Index_Buffer_Type::UInt32;
 }
@@ -1202,15 +1409,15 @@ void DirectX12_api::create_render_pass(render_pass* pass, shader* pass_shader,
             D3D12_DESCRIPTOR_HEAP_DESC desc = {};
             desc.NumDescriptors = BATCH_SIZE; // todo: how big?
             desc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-            desc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+            desc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
             desc.NodeMask       = 0;
 
             if FAILED(dx12.Device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&_pass->CBV_Heap[n]))) {
                 RH_FATAL("Failed making descriptor heap");
                 return;
             }
+            _pass->CBV_Heap[n]->SetName(L"Pass Heap: CBV");
         }
-
 
         // Per Frame Constant Buffer
         uint64 cbSize = (sz_per_pass + 255) & ~255; // make it a multiple of 256, minimum alloc size
@@ -1219,8 +1426,8 @@ void DirectX12_api::create_render_pass(render_pass* pass, shader* pass_shader,
         auto desc = CD3DX12_RESOURCE_DESC::Buffer(cbSize);
         dx12.Device->CreateCommittedResource(&prop, D3D12_HEAP_FLAG_NONE,
                                              &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
-                                             nullptr, IID_PPV_ARGS(&_pass->per_pass_buffer[n].gpu_resource));
-        _pass->per_pass_buffer[n].gpu_resource->Map(0, nullptr,  (void**)(&_pass->per_pass_buffer[n].cpu_mapped));
+                                             nullptr, IID_PPV_ARGS(&_pass->per_pass_buffer[n].gpu_upload_buffer));
+        _pass->per_pass_buffer[n].gpu_upload_buffer->Map(0, nullptr,  (void**)(&_pass->per_pass_buffer[n].cpu_mapped));
 
         // Per Object Constant Buffer
         cbSize = (sz_per_obj + 255) & ~255; // make it a multiple of 256, minimum alloc size
@@ -1230,11 +1437,11 @@ void DirectX12_api::create_render_pass(render_pass* pass, shader* pass_shader,
         desc = CD3DX12_RESOURCE_DESC::Buffer(cbSize*BATCH_SIZE);
         dx12.Device->CreateCommittedResource(&prop, D3D12_HEAP_FLAG_NONE,
                                              &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
-                                             nullptr, IID_PPV_ARGS(&_pass->per_obj_buffer[n].gpu_resource));
+                                             nullptr, IID_PPV_ARGS(&_pass->per_obj_buffer[n].gpu_upload_buffer));
 
         for (uint16 b = 0; b < BATCH_SIZE; b++) {
             D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc;
-            cbv_desc.BufferLocation = _pass->per_obj_buffer[n].gpu_resource->GetGPUVirtualAddress() + cbSize*b;
+            cbv_desc.BufferLocation = _pass->per_obj_buffer[n].gpu_upload_buffer->GetGPUVirtualAddress() + cbSize*b;
             cbv_desc.SizeInBytes = (uint32)cbSize;
 
             CD3DX12_CPU_DESCRIPTOR_HANDLE heap(_pass->CBV_Heap[n]->GetCPUDescriptorHandleForHeapStart(),
@@ -1242,7 +1449,7 @@ void DirectX12_api::create_render_pass(render_pass* pass, shader* pass_shader,
             dx12.Device->CreateConstantBufferView(&cbv_desc, heap);
         }
 
-        _pass->per_obj_buffer[n].gpu_resource->Map(0, nullptr,  (void**)(&_pass->per_obj_buffer[n].cpu_mapped));
+        _pass->per_obj_buffer[n].gpu_upload_buffer->Map(0, nullptr,  (void**)(&_pass->per_obj_buffer[n].cpu_mapped));
     }
 
     // vertex input description
@@ -1256,7 +1463,7 @@ void DirectX12_api::create_render_pass(render_pass* pass, shader* pass_shader,
 
     // create root signature
     {
-        D3D12_ROOT_PARAMETER root_parameters[3];
+        D3D12_ROOT_PARAMETER root_parameters[5];
         
         // Root Constants
         root_parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
@@ -1288,28 +1495,28 @@ void DirectX12_api::create_render_pass(render_pass* pass, shader* pass_shader,
         root_parameters[2].Descriptor.RegisterSpace  = 0;
 
         // Textures
-        //D3D12_DESCRIPTOR_RANGE srv_range = {};
-        //srv_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-        //srv_range.BaseShaderRegister = 0;
-        //srv_range.NumDescriptors = 1;
-        //srv_range.RegisterSpace = 0;
-        //srv_range.OffsetInDescriptorsFromTableStart = 0;
-        //root_parameters[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-        //root_parameters[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-        //root_parameters[3].DescriptorTable.NumDescriptorRanges = 1;
-        //root_parameters[3].DescriptorTable.pDescriptorRanges = &srv_range;
+        D3D12_DESCRIPTOR_RANGE srv_range = {};
+        srv_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        srv_range.BaseShaderRegister = 0;
+        srv_range.NumDescriptors = 1;
+        srv_range.RegisterSpace = 0;
+        srv_range.OffsetInDescriptorsFromTableStart = 0;
+        root_parameters[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        root_parameters[3].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        root_parameters[3].DescriptorTable.NumDescriptorRanges = 1;
+        root_parameters[3].DescriptorTable.pDescriptorRanges = &srv_range;
 
         // Samplers
-        //D3D12_DESCRIPTOR_RANGE sampler_range = {};
-        //sampler_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
-        //sampler_range.BaseShaderRegister = 0;
-        //sampler_range.NumDescriptors = 1;
-        //sampler_range.RegisterSpace = 0;
-        //sampler_range.OffsetInDescriptorsFromTableStart = 0;
-        //root_parameters[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-        //root_parameters[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-        //root_parameters[4].DescriptorTable.NumDescriptorRanges = 1;
-        //root_parameters[4].DescriptorTable.pDescriptorRanges = &sampler_range;
+        D3D12_DESCRIPTOR_RANGE sampler_range = {};
+        sampler_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+        sampler_range.BaseShaderRegister = 0;
+        sampler_range.NumDescriptors = 1;
+        sampler_range.RegisterSpace = 0;
+        sampler_range.OffsetInDescriptorsFromTableStart = 0;
+        root_parameters[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        root_parameters[4].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        root_parameters[4].DescriptorTable.NumDescriptorRanges = 1;
+        root_parameters[4].DescriptorTable.pDescriptorRanges = &sampler_range;
 
         CD3DX12_ROOT_SIGNATURE_DESC root_sig_desc(_countof(root_parameters), root_parameters, 
                                                   0, nullptr, // static samplers
@@ -1376,22 +1583,32 @@ void DirectX12_api::create_render_pass(render_pass* pass, shader* pass_shader,
 void DirectX12_api::begin_render_pass(render_pass* pass) {
     AssertMsg(!(pass->per_frame || pass->per_object), "Buffers still mapped. Did you forget to end_render_pass()?");
 
-    //DX12State::_Render_Pass* _pass = dx12.render_passes.passes[pass->handle];
+    DX12State::_Render_Pass* _pass = &dx12.render_passes.passes[pass->handle];
 
-    pass->per_frame  = dx12.render_passes.passes[pass->handle].per_pass_buffer[dx12.frame_idx].cpu_mapped;
-    pass->per_object = dx12.render_passes.passes[pass->handle].per_obj_buffer[dx12.frame_idx].cpu_mapped;
+    pass->per_frame  = _pass->per_pass_buffer[dx12.frame_idx].cpu_mapped;
+    pass->per_object = _pass->per_obj_buffer[dx12.frame_idx].cpu_mapped;
 
-    dx12.CmdList->SetPipelineState(dx12.render_passes.passes[pass->handle].pso);
-    dx12.CmdList->SetGraphicsRootSignature(dx12.render_passes.passes[pass->handle].root_sig);
+    dx12.CmdList->SetPipelineState(_pass->pso);
+    dx12.CmdList->SetGraphicsRootSignature(_pass->root_sig);
     dx12.CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
+    // copy CBV from storage to staging heap
     ID3D12DescriptorHeap* heaps[] = {
-        dx12.render_passes.passes[pass->handle].CBV_Heap[dx12.frame_idx]
+        //dx12.render_passes.passes[pass->handle].CBV_Heap[dx12.frame_idx]
+        dx12.frames[dx12.frame_idx].Staging_Heap.Get(),
+        dx12.Sam_DescriptorHeap.Get()
     };
     dx12.CmdList->SetDescriptorHeaps(_countof(heaps), heaps);
 
     // [2] - Per-Frame Root Descriptor
-    dx12.CmdList->SetGraphicsRootConstantBufferView(2, dx12.render_passes.passes[pass->handle].per_pass_buffer[dx12.frame_idx].gpu_resource->GetGPUVirtualAddress());
+    dx12.CmdList->SetGraphicsRootConstantBufferView(2, _pass->per_pass_buffer[dx12.frame_idx].gpu_upload_buffer->GetGPUVirtualAddress());
+
+    // [4] - Sampler Descriptor Heap
+    CD3DX12_GPU_DESCRIPTOR_HANDLE sam(dx12.Sam_DescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    sam.Offset(0, dx12.Sam_DescriptorSize);
+    dx12.CmdList->SetGraphicsRootDescriptorTable(4, sam);
+
+    dx12.frames[dx12.frame_idx].Staging_Offset = 0;
 }
 void DirectX12_api::end_render_pass(render_pass* pass) {
     AssertMsg((pass->per_frame && pass->per_object), "Buffers not mapped. Did you forget to begin_render_pass()?");
@@ -1442,6 +1659,17 @@ void DirectX12_api::draw_indexed_instanced(uint32 inds_per_instance, uint32 inst
 }
 
 void DirectX12_api::bind_texture_2D(render_texture_2D texture, uint32 slot) {
+    DX12State::_Resource* _texture = &dx12.textures.resources[texture.handle];
+    
+    // copy the descriptor to the currently bound heap
+    uint32 tex_slot = dx12.frames[dx12.frame_idx].Staging_Offset + 1 + slot;
+    D3D12_CPU_DESCRIPTOR_HANDLE dst_range = CD3DX12_CPU_DESCRIPTOR_HANDLE(dx12.frames[dx12.frame_idx].Staging_Heap->GetCPUDescriptorHandleForHeapStart(),
+                                                                          tex_slot, dx12.CBV_SRV_UAV_DescriptorSize);
+
+    D3D12_CPU_DESCRIPTOR_HANDLE src_range = CD3DX12_CPU_DESCRIPTOR_HANDLE(dx12.CBV_SRV_UAV_DescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+                                                                          texture.handle, dx12.CBV_SRV_UAV_DescriptorSize);
+
+    dx12.Device->CopyDescriptorsSimple(1, dst_range, src_range, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 }
 void DirectX12_api::bind_texture_3D(render_texture_3D texture, uint32 slot) {
 }

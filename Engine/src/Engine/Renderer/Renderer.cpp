@@ -131,10 +131,10 @@ bool32 renderer_create_pipeline() {
         RH_FATAL("Could not load default textures");
         return false;
     }
-    if (!resource_load_texture_file("Data/textures/black.png", &render_state->black_tex)) {
-        RH_FATAL("Could not load default textures");
-        return false;
-    }
+    //if (!resource_load_texture_file("Data/textures/black.png", &render_state->black_tex)) {
+    //    RH_FATAL("Could not load default textures");
+    //    return false;
+    //}
     if (!resource_load_texture_debug_cube_map(&render_state->cube_tex)) {
         RH_FATAL("Could not load default cubemap");
         return false;
@@ -609,7 +609,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
             render_command& cmd = packet->commands[cmd_index];
             render_material& mat = cmd.material;
 
-            backend->set_batch_index(&render_state->simple_pass, cmd_index);
+            backend->start_draw_call(&render_state->simple_pass, cmd_index);
             simple_per_object_constants* per_object = (simple_per_object_constants*)render_state->simple_pass.per_object;
 
             per_object->r_Transform = cmd.model_matrix;
@@ -618,11 +618,11 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
             //backend->upload_uniform_float4x4(simple.r_Transform, cmd.model_matrix);
             //backend->upload_uniform_float3(simple.u_color, mat.DiffuseFactor);
             //
-            //if (mat.flag & 0x02) {
-            //    backend->bind_texture_2D(mat.DiffuseTexture, 0);
-            //} else {
-            //    backend->bind_texture_2D(render_state->white_tex.texture, 0);
-            //}
+            if (mat.flag & 0x02) {
+                backend->bind_texture_2D(mat.DiffuseTexture, 0);
+            } else {
+                backend->bind_texture_2D(render_state->white_tex.texture, 0);
+            }
 
             backend->bind_geometry(&cmd.geom);
             backend->draw_indexed(cmd.geom.num_inds, 0, 0);
