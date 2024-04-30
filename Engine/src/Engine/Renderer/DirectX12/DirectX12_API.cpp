@@ -7,6 +7,8 @@
 #include "Engine/Memory/Memory_Arena.h"
 #include "Engine/Platform/Platform.h"
 
+#include "Engine/Resources/Filetype/dds_file_reader.h"
+
 #include <stdarg.h>
 
 // DirectX 12 headers.
@@ -995,39 +997,17 @@ void DirectX12_api::pop_debug_group() {
     }
 }
 
-DXGI_FORMAT DXGIFormat_from_CreateInfo(texture_creation_info_2D create_info, bool32 is_hdr) {
-    if (is_hdr) {
-        switch (create_info.num_channels) {
-            case 1: return DXGI_FORMAT_R32_FLOAT;
-            case 2: return DXGI_FORMAT_R32G32_FLOAT;
-            case 3: return DXGI_FORMAT_R32G32B32_FLOAT;
-            case 4: return DXGI_FORMAT_R32G32B32A32_FLOAT;
-
-            default: return DXGI_FORMAT_UNKNOWN;
-        }
-    } else {
-        switch (create_info.num_channels) {
-            case 1: return DXGI_FORMAT_R8_UNORM;
-            case 2: return DXGI_FORMAT_R8G8_UNORM;
-            case 4: return DXGI_FORMAT_R8G8B8A8_UNORM;
-
-            default: return DXGI_FORMAT_UNKNOWN;
-        }
-    }
-}
-
 void DirectX12_api::create_texture_2D(struct render_texture_2D* texture, 
                                    texture_creation_info_2D create_info, 
-                                   const void* data, bool32 is_hdr) {
+                                   const void* data) {
     // first create the resource handle
     uint16 handle = dx12.textures.next_handle++;
     dx12.textures.num_alloced++;
     AssertMsg(dx12.textures.num_alloced < dx12.textures.total_capacity, "Ran out of texture slots!");
     DX12State::_Resource* _texture = &dx12.textures.resources[handle];
 
-    const uint64 bytes_per_pixel = create_info.num_channels * (is_hdr ? 4 : 1);
-    //const uint64 uploadBufferSize = create_info.width * create_info.height * bytes_per_pixel;
-    DXGI_FORMAT format = DXGIFormat_from_CreateInfo(create_info, is_hdr); /*DXGI_FORMAT_BC3_UNORM*/;
+    DXGI_FORMAT format = static_cast<DXGI_FORMAT>(create_info.format);
+    const uint64 bytes_per_pixel = (BitsPerPixel(format) + 7u) / 8u;
 
     // create resource in DEFAULT_HEAP
     auto prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
@@ -1038,9 +1018,9 @@ void DirectX12_api::create_texture_2D(struct render_texture_2D* texture,
         nullptr, IID_PPV_ARGS(&_texture->gpu_resource));
     _texture->gpu_resource->SetName(L"texture.......");
 
-    const uint64 uploadBufferSize = GetRequiredIntermediateSize(_texture->gpu_resource, 0, 1);
 
     // create upload_buffer in UPLOAD_HEAP
+    const uint64 uploadBufferSize = GetRequiredIntermediateSize(_texture->gpu_resource, 0, 1);
     prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     desc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
     dx12.Device->CreateCommittedResource(
@@ -1048,9 +1028,9 @@ void DirectX12_api::create_texture_2D(struct render_texture_2D* texture,
         &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
         nullptr, IID_PPV_ARGS(&_texture->gpu_upload_buffer));
 
-    _texture->gpu_upload_buffer->Map(0, nullptr, (void**)&_texture->cpu_mapped);
-    memory_copy(_texture->cpu_mapped, data, uploadBufferSize);
-    _texture->gpu_upload_buffer->Unmap(0, nullptr);
+    //_texture->gpu_upload_buffer->Map(0, nullptr, (void**)&_texture->cpu_mapped);
+    //memory_copy(_texture->cpu_mapped, data, uploadBufferSize);
+    //_texture->gpu_upload_buffer->Unmap(0, nullptr);
 
     // schedule the copy from UPLOAD to DEFAULT
     dx12.frames[dx12.frame_idx].CommandAllocator->Reset();
@@ -1064,7 +1044,7 @@ void DirectX12_api::create_texture_2D(struct render_texture_2D* texture,
                                                                           D3D12_RESOURCE_STATE_COPY_DEST);
     dx12.CmdList->ResourceBarrier(1, &barrier);
 
-    uint64 rowBytes = (uint64(create_info.width) * bytes_per_pixel*8u + 7u) / 8u; // round up to nearest byte
+    uint64 rowBytes = uint64(create_info.width) * bytes_per_pixel;
     uint64 numBytes = rowBytes * create_info.height;
 
     D3D12_SUBRESOURCE_DATA sub;
@@ -1072,7 +1052,6 @@ void DirectX12_api::create_texture_2D(struct render_texture_2D* texture,
     sub.RowPitch   = rowBytes;
     sub.SlicePitch = numBytes;
 
-    #if 1
     if (0 == UpdateSubresources(dx12.CmdList.Get(),           // cmdList
                                 _texture->gpu_resource,       // Destination
                                 _texture->gpu_upload_buffer,  // Intermediate
@@ -1083,18 +1062,6 @@ void DirectX12_api::create_texture_2D(struct render_texture_2D* texture,
     {
         RH_ERROR("Failed on UpdateSubresources");
     }
-    #else
-    const CD3DX12_TEXTURE_COPY_LOCATION Dst(_texture->gpu_resource, 0);
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT src_footprint;
-    src_footprint.Offset = 0;
-    src_footprint.Footprint.Format = format;
-    src_footprint.Footprint.Width = create_info.width;
-    src_footprint.Footprint.Height = create_info.height;
-    src_footprint.Footprint.Depth = 1;
-    src_footprint.Footprint.RowPitch = (uint32)rowBytes;
-    const CD3DX12_TEXTURE_COPY_LOCATION Src(_texture->gpu_upload_buffer, src_footprint);
-    dx12.CmdList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
-    #endif
 
     barrier = CD3DX12_RESOURCE_BARRIER::Transition(_texture->gpu_resource,
                                                    D3D12_RESOURCE_STATE_COPY_DEST,
@@ -1137,7 +1104,7 @@ void DirectX12_api::create_texture_cube(struct render_texture_cube* texture,
 
 void DirectX12_api::create_texture_3D(struct render_texture_3D* texture, 
                                    texture_creation_info_3D create_info, 
-                                   const void* data, bool32 is_hdr) {
+                                   const void* data) {
     texture->handle = 0;
 }
 

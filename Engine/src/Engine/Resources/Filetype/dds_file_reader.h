@@ -2,9 +2,12 @@
 
 #include "Engine/Resources/Resource_Types.h"
 
+#include <dxgiformat.h>
+
 enum class dds_file_result : int32 {
     error = -1,
     success,
 };
 
 RHAPI unsigned char* dds_load_from_memory(uint8 const *buffer, int len, int *x, int *y, int *channels_in_file, int desired_channels);
+size_t BitsPerPixel(DXGI_FORMAT fmt) noexcept;

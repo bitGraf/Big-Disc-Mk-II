@@ -16,7 +16,7 @@ bool32 resource_load_texture_file(const char* resource_file_name,
                                   resource_texture_2D* texture) {
 
     char full_path[256];
-    platform_get_full_resource_path(full_path, 256, resource_file_name);
+    uint64 path_len = platform_get_full_resource_path(full_path, 256, resource_file_name);
 
     RH_TRACE("Full filename: [%s]", full_path);
 
@@ -28,77 +28,77 @@ bool32 resource_load_texture_file(const char* resource_file_name,
 
     memory_arena* arena = resource_get_arena();
 
-    stbi_set_flip_vertically_on_load(true);
-    // TODO: This calls malloc under the hood!
-    //       can be overwritten with #define STBI_MALLOC ...
-    int x,y,n;
-    unsigned char *bitmap = stbi_load_from_memory(file.data, (int)file.num_bytes, &x, &y, &n, 4);
-    platform_free_file_data(&file);
-    if (bitmap == NULL) {
-        RH_ERROR("Failed to load image file!");
-        return false;
+    // check if a .dds file type. If so, use the directx loading function
+    char* ext;
+    for (ext = &full_path[path_len - 1]; (*ext != '.') && (ext != full_path); ext--) {}
+
+    Texture_Format format = TEXTURE_FORMAT_UNKNOWN;
+    int width,height;
+    void* data = nullptr;
+    bool stbi = false;
+
+    if (string_compare(ext, ".dds") == 0) {
+        width = 0;
+        height = 0;
+        data = 0;
+    } else {
+        stbi = true; // to cleanup
+
+        int num_channels = 0;
+        stbi_set_flip_vertically_on_load(true);
+        // TODO: This calls malloc under the hood!
+        //       can be overwritten with #define STBI_MALLOC ...
+
+        if (string_compare(ext, ".hdr") == 0) {
+            float* f32_data = stbi_loadf_from_memory(file.data, (int)file.num_bytes, &width, &height, &num_channels, 0);
+
+            switch (num_channels) {
+                case 1: format = TEXTURE_FORMAT_R_FLOAT32;    break;
+                case 2: format = TEXTURE_FORMAT_RG_FLOAT32;   break;
+                case 3: format = TEXTURE_FORMAT_RGB_FLOAT32;  break;
+                case 4: format = TEXTURE_FORMAT_RGBA_FLOAT32; break;
+            }
+            data = f32_data;
+        } else {
+            // NOTE: 3-channel formats are not easily supported by the GPU, so for now we request
+            //       stbi to return a 4-channel texture always. 
+            //       A better way might be to load normally, then if its a 3-channel call
+            //       stbi_load again and request a 4-channel in that case, so that we can
+            //       still support 1- and 2-channel textures. Not sure if I want to do this, since I 
+            //       would prefer to swap everything to .dds anyway...
+            uint8* bitmap = stbi_load_from_memory(file.data, (int)file.num_bytes, &width, &height, &num_channels, 4);
+
+            switch (num_channels) {
+                case 1: format = TEXTURE_FORMAT_R_U8_NORM;    break;
+                case 2: format = TEXTURE_FORMAT_RG_U8_NORM;   break;
+                case 4: format = TEXTURE_FORMAT_RGBA_U8_NORM; break;
+            }
+            data = bitmap;
+        }
+
+        if (data == NULL) {
+            RH_ERROR("Failed to load image file!");
+            return false;
+        }
     }
 
-    texture->width = (uint16)x;
-    texture->height = (uint16)y;
-    texture->num_channels = (uint16)n;
-    texture->is_hdr = 0;
+    AssertMsg(format != TEXTURE_FORMAT_UNKNOWN, "Could not determine the format!");
 
     texture_creation_info_2D info;
-    info.width = texture->width;
-    info.height = texture->height;
-    info.num_channels = texture->num_channels;
-    renderer_create_texture(&texture->texture, info, bitmap, false);
+    info.width  = static_cast<uint16>(width);
+    info.height = static_cast<uint16>(height);
+    info.format = format;
+    renderer_create_texture(&texture->texture, info, data);
 
-    stbi_image_free(bitmap);
+    platform_free_file_data(&file);
+    if (stbi) {
+        stbi_image_free(data);
+    }
 
     return true;
 }
 
-
-bool32 resource_load_texture_file_hdr(const char* resource_file_name,
-                                      resource_texture_2D* texture) {
-
-    char full_path[256];
-    platform_get_full_resource_path(full_path, 256, resource_file_name);
-
-    RH_TRACE("Full filename: [%s]", full_path);
-
-    file_handle file = platform_read_entire_file(full_path);
-    if (!file.num_bytes) {
-        RH_ERROR("Failed to read resource file");
-        return false;
-    }
-
-    memory_arena* arena = resource_get_arena();
-
-    stbi_set_flip_vertically_on_load(true);
-    // TODO: This calls malloc under the hood!
-    //       can be overwritten with #define STBI_MALLOC ...
-    int x,y,n;
-    real32 *data = stbi_loadf_from_memory(file.data, (int)file.num_bytes, &x, &y, &n, 0);
-    platform_free_file_data(&file);
-    if (data == NULL) {
-        RH_ERROR("Failed to load image file!");
-        return false;
-    }
-
-    texture->width = (uint16)x;
-    texture->height = (uint16)y;
-    texture->num_channels = (uint16)n;
-    texture->is_hdr = 1;
-
-    texture_creation_info_2D info;
-    info.width = texture->width;
-    info.height = texture->height;
-    info.num_channels = texture->num_channels;
-    renderer_create_texture(&texture->texture, info, data, true);
-
-    stbi_image_free(data);
-
-    return true;
-}
-
+#if 0
 bool32 resource_load_texture_debug_cube_map(resource_texture_cube* texture) {
     char* cube_sides[] = {
         "Data/textures/pos_x.png",
@@ -147,7 +147,7 @@ bool32 resource_load_texture_debug_cube_map(resource_texture_cube* texture) {
     texture_creation_info_cube info;
     info.width = texture->width;
     info.height = texture->height;
-    info.num_channels = texture->num_channels;
+    //info.num_channels = texture->num_channels;
     renderer_create_texture_cube(&texture->texture, info, (const void***)(bitmaps), false);
 
     for (uint32 face = 0; face < 6; face++) {
@@ -419,7 +419,7 @@ bool32 resource_load_texture_cube_map_with_mips(const char* resource_file_base_n
     texture_creation_info_cube info;
     info.width        = texture->width;
     info.height       = texture->height;
-    info.num_channels = texture->num_channels;
+    //info.num_channels = texture->num_channels;
     renderer_create_texture_cube(&texture->texture, info, (const void***)(bitmaps), false, mip_levels);
 
     for (uint32 face = 0; face < 6; face++) {
@@ -496,7 +496,7 @@ bool32 resource_load_texture_cube_map_hdr_with_mips(const char* resource_file_ba
     texture_creation_info_cube info;
     info.width        = texture->width;
     info.height       = texture->height;
-    info.num_channels = texture->num_channels;
+    //info.num_channels = texture->num_channels;
     renderer_create_texture_cube(&texture->texture, info, (const void***)(bitmaps), true, mip_levels);
 
     for (uint32 face = 0; face < 6; face++) {
@@ -522,3 +522,4 @@ bool32 resource_write_env_map_metadata(const char* path, resource_env_map* env_m
 
     return true;
 }
+#endif

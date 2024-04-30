@@ -83,15 +83,47 @@ struct render_geometry {
     uint32 num_inds;
 };
 
+// Enum values chosen to match select DXGI_FORMAT formats.
+enum Texture_Format : uint16 {
+    TEXTURE_FORMAT_UNKNOWN               = 0,
+    TEXTURE_FORMAT_RGBA_FLOAT32          = 2,
+    TEXTURE_FORMAT_RGB_FLOAT32           = 6,
+    TEXTURE_FORMAT_RGBA_FLOAT16          = 10,
+    TEXTURE_FORMAT_RG_FLOAT32            = 16,
+    TEXTURE_FORMAT_RGBA_U8_NORM          = 28,
+    TEXTURE_FORMAT_RGBA_U8_NORM_SRGB     = 29,
+    TEXTURE_FORMAT_RG_FLOAT16            = 34,
+    TEXTURE_FORMAT_RG_U16_NORM           = 35,
+    TEXTURE_FORMAT_DEPTH_32F             = 40,
+    TEXTURE_FORMAT_R_FLOAT32             = 41,
+    TEXTURE_FORMAT_DEPTH_24F_STENCIL_U8  = 45,
+    TEXTURE_FORMAT_RG_U8_NORM            = 49,
+    TEXTURE_FORMAT_R_FLOAT16             = 54,
+    TEXTURE_FORMAT_DEPTH_16F             = 55,
+    TEXTURE_FORMAT_R_U16_NORM            = 56,
+    TEXTURE_FORMAT_R_U8_NORM             = 61,
+    TEXTURE_FORMAT_BC1_UNORM             = 71,
+    TEXTURE_FORMAT_BC1_UNORM_SRGB        = 72,
+    TEXTURE_FORMAT_BC2_UNORM             = 74,
+    TEXTURE_FORMAT_BC2_UNORM_SRGB        = 75,
+    TEXTURE_FORMAT_BC3_UNORM             = 77,
+    TEXTURE_FORMAT_BC3_UNORM_SRGB        = 78,
+    TEXTURE_FORMAT_BC4_UNORM             = 80,
+    TEXTURE_FORMAT_BC4_SNORM             = 81,
+    TEXTURE_FORMAT_BC5_UNORM             = 83,
+    TEXTURE_FORMAT_BC5_SNORM             = 84,
+    TEXTURE_FORMAT_BC7_UNORM             = 98,
+    TEXTURE_FORMAT_BC7_UNORM_SRGB        = 99,
+};
+
 struct render_texture_2D {
     uint32 handle; // handle to the gpu version of this data
 };
 struct texture_creation_info_2D {
     uint16 width;
     uint16 height;
-    uint16 num_channels;
 
-    // filtering flags
+    Texture_Format format;
 };
 
 struct render_texture_3D {
@@ -101,8 +133,8 @@ struct texture_creation_info_3D {
     uint16 width;
     uint16 height;
     uint16 depth;
-    uint16 num_channels;
 
+    Texture_Format format;
     // filtering flags
 };
 
@@ -112,8 +144,8 @@ struct render_texture_cube {
 struct texture_creation_info_cube {
     uint16 width;
     uint16 height;
-    uint16 num_channels;
-
+    
+    Texture_Format format;
     // filtering flags
 };
 
@@ -350,8 +382,8 @@ struct renderer_api {
     virtual void push_debug_group(const char* label) = 0;
     virtual void pop_debug_group() = 0;
 
-    virtual void create_texture_2D(struct   render_texture_2D*   texture, texture_creation_info_2D   create_info, const void*  data, bool32 is_hdr) = 0;
-    virtual void create_texture_3D(struct   render_texture_3D*   texture, texture_creation_info_3D   create_info, const void*  data, bool32 is_hdr) = 0;
+    virtual void create_texture_2D(struct   render_texture_2D*   texture, texture_creation_info_2D   create_info, const void*  data) = 0;
+    virtual void create_texture_3D(struct   render_texture_3D*   texture, texture_creation_info_3D   create_info, const void*  data) = 0;
     virtual void create_texture_cube(struct render_texture_cube* texture, texture_creation_info_cube create_info, 
                                      const void*** data, bool32 is_hdr, uint32 mip_levels) = 0;
 

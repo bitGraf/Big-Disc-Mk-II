@@ -297,35 +297,60 @@ void OpenGL_api::pop_debug_group() {
     glPopDebugGroup();
 }
 
+GLenum GL_InternalFormat(Texture_Format tex_format) {
+    GLenum internal_format = 0;
+    switch (tex_format) {
+        case TEXTURE_FORMAT_R_U8_NORM:    internal_format = GL_R8; break;
+        case TEXTURE_FORMAT_RG_U8_NORM:   internal_format = GL_RG8; break;
+        case TEXTURE_FORMAT_RGBA_U8_NORM: internal_format = GL_RGBA8; break;
+
+        case TEXTURE_FORMAT_R_FLOAT32:    internal_format = GL_R16F; break;
+        case TEXTURE_FORMAT_RG_FLOAT32:   internal_format = GL_RG16F; break;
+        case TEXTURE_FORMAT_RGB_FLOAT32:  internal_format = GL_RGB16F; break;
+        case TEXTURE_FORMAT_RGBA_FLOAT32: internal_format = GL_RGBA16F; break;
+    };
+    return internal_format;
+}
+GLenum GL_Format(Texture_Format tex_format) {
+    GLenum format = 0;
+    switch (tex_format) {
+        case TEXTURE_FORMAT_R_U8_NORM:
+        case TEXTURE_FORMAT_R_FLOAT32:    format = GL_RED; break;
+
+        case TEXTURE_FORMAT_RG_U8_NORM:
+        case TEXTURE_FORMAT_RG_FLOAT32:   format = GL_RG; break;
+
+        case TEXTURE_FORMAT_RGB_FLOAT32:  format = GL_RGB; break;
+
+        case TEXTURE_FORMAT_RGBA_U8_NORM:
+        case TEXTURE_FORMAT_RGBA_FLOAT32: format = GL_RGBA; break;
+    };
+    return format;
+}
+GLenum GL_Type(Texture_Format tex_format) {
+    GLenum type = 0;
+    switch (tex_format) {
+        case TEXTURE_FORMAT_R_U8_NORM:
+        case TEXTURE_FORMAT_RG_U8_NORM:
+        case TEXTURE_FORMAT_RGBA_U8_NORM: type = GL_UNSIGNED_BYTE; break;
+
+        case TEXTURE_FORMAT_R_FLOAT32:
+        case TEXTURE_FORMAT_RG_FLOAT32:
+        case TEXTURE_FORMAT_RGB_FLOAT32:
+        case TEXTURE_FORMAT_RGBA_FLOAT32: type = GL_FLOAT; break;
+    };
+    return type;
+}
+
 void OpenGL_api::create_texture_2D(struct render_texture_2D* texture, 
                                    texture_creation_info_2D create_info, 
-                                   const void* data, bool32 is_hdr) {
+                                   const void* data) {
     glGenTextures(1, &texture->handle);
     glBindTexture(GL_TEXTURE_2D, texture->handle);
 
-    GLenum InternalFormat = 0;
-    GLenum Format = 0;
-    GLenum Type = is_hdr ? GL_FLOAT : GL_UNSIGNED_BYTE;
-    switch (create_info.num_channels) {
-        case 1: {
-            InternalFormat = is_hdr ? GL_R16F : GL_R8;
-            Format = GL_RED;
-        } break;
-        case 2: {
-            InternalFormat = is_hdr ? GL_RG16F : GL_RG8;
-            Format = GL_RG;
-        } break;
-        case 3: {
-            InternalFormat = is_hdr ? GL_RGB16F : GL_RGB8;
-            Format = GL_RGB;
-        } break;
-        case 4: {
-            InternalFormat = is_hdr ? GL_RGBA16F : GL_RGBA8;
-            Format = GL_RGBA;
-        } break;
-        default:
-            AssertMsg(false, "Invalid number of channels");
-    }
+    GLenum InternalFormat = GL_InternalFormat(create_info.format);
+    GLenum Format = GL_Format(create_info.format);
+    GLenum Type = GL_Type(create_info.format);
 
     glTexImage2D(GL_TEXTURE_2D, 0, InternalFormat, create_info.width, create_info.height, 0, Format, Type, data);
     glGenerateMipmap(GL_TEXTURE_2D);
@@ -345,29 +370,9 @@ void OpenGL_api::create_texture_cube(struct render_texture_cube* texture,
     glGenTextures(1, &texture->handle);
     glBindTexture(GL_TEXTURE_CUBE_MAP, texture->handle);
 
-    GLenum InternalFormat = 0;
-    GLenum Format = 0;
-    GLenum Type = is_hdr ? GL_FLOAT : GL_UNSIGNED_BYTE;
-    switch (create_info.num_channels) {
-        case 1: {
-            InternalFormat = is_hdr ? GL_R16F : GL_R8;
-            Format = GL_RED;
-        } break;
-        case 2: {
-            InternalFormat = is_hdr ? GL_RG16F : GL_RG8;
-            Format = GL_RG;
-        } break;
-        case 3: {
-            InternalFormat = is_hdr ? GL_RGB16F : GL_RGB8;
-            Format = GL_RGB;
-        } break;
-        case 4: {
-            InternalFormat = is_hdr ? GL_RGBA16F : GL_RGBA8;
-            Format = GL_RGBA;
-        } break;
-        default:
-            AssertMsg(false, "Invalid number of channels");
-    }
+    GLenum InternalFormat = GL_InternalFormat(create_info.format);
+    GLenum Format = GL_Format(create_info.format);
+    GLenum Type = GL_Type(create_info.format);
 
     bool32 has_mips = mip_levels > 1;
 
@@ -406,7 +411,7 @@ void OpenGL_api::create_texture_cube(struct render_texture_cube* texture,
 
 void OpenGL_api::create_texture_3D(struct render_texture_3D* texture, 
                                    texture_creation_info_3D create_info, 
-                                   const void* data, bool32 is_hdr) {
+                                   const void* data) {
     RH_ERROR("OpenGL::create_texture_3D() not yet implemented!");
 }
 

@@ -38,8 +38,8 @@ struct OpenGL_api final : public renderer_api {
     void set_stencil_func(render_stencil_func func, uint32 ref, uint32 mask) override final;
     void set_stencil_op(render_stencil_op sfail, render_stencil_op dpfail, render_stencil_op dppass) override final;
 
-    void create_texture_2D(struct render_texture_2D*     texture, texture_creation_info_2D   create_info, const void* data, bool32 is_hdr) override final;
-    void create_texture_3D(struct render_texture_3D*     texture, texture_creation_info_3D   create_info, const void* data, bool32 is_hdr) override final;
+    void create_texture_2D(struct render_texture_2D*     texture, texture_creation_info_2D   create_info, const void* data) override final;
+    void create_texture_3D(struct render_texture_3D*     texture, texture_creation_info_3D   create_info, const void* data) override final;
     void create_texture_cube(struct render_texture_cube* texture, texture_creation_info_cube create_info, 
                              const void*** data, bool32 is_hdr, uint32 mip_levels) override final;
 

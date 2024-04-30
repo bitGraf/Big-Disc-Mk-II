@@ -135,10 +135,10 @@ bool32 renderer_create_pipeline() {
     //    RH_FATAL("Could not load default textures");
     //    return false;
     //}
-    if (!resource_load_texture_debug_cube_map(&render_state->cube_tex)) {
-        RH_FATAL("Could not load default cubemap");
-        return false;
-    }
+    //if (!resource_load_texture_debug_cube_map(&render_state->cube_tex)) {
+    //    RH_FATAL("Could not load default cubemap");
+    //    return false;
+    //}
 
     RH_TRACE("%.3lf ms to load default textures", measure_elapsed_time(last_time, &last_time)*1000.0f);
 
@@ -1193,8 +1193,8 @@ bool32 renderer_end_wireframe() {
 
 void renderer_create_texture(struct render_texture_2D* texture,
                              texture_creation_info_2D create_info, 
-                             const void* data, bool32 is_hdr) {
-    backend->create_texture_2D(texture, create_info, data, is_hdr);
+                             const void* data) {
+    backend->create_texture_2D(texture, create_info, data);
 }
 void renderer_create_texture_cube(struct render_texture_cube* texture,
                                   texture_creation_info_cube create_info,
@@ -1412,8 +1412,8 @@ void renderer_precompute_env_map_from_equirectangular(resource_env_map* env_map,
     texture_creation_info_2D info;
     info.width = env_map->src.width;
     info.height = env_map->src.height;
-    info.num_channels = env_map->src.num_channels;
-    renderer_create_texture(&env_map->src.texture, info, data, true);
+    //info.num_channels = env_map->src.num_channels;
+    renderer_create_texture(&env_map->src.texture, info, data);
 
     backend->use_shader(pConvert);
     backend->upload_uniform_float4x4(convert.r_Projection, cap_projection);

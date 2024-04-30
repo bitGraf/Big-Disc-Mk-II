@@ -4,9 +4,6 @@
 #include "Engine/Core/Asserts.h"
 #include "Engine/Platform/Platform.h"
 
-// DirectX/Windows Headers
-#include <dxgiformat.h>
-
 //--------------------------------------------------------------------------------------
 // Macros
 //--------------------------------------------------------------------------------------
@@ -97,7 +94,6 @@ bool LoadTextureDataFromMemory(const uint8* ddsData, uint64 ddsDataSize,
                                const uint8** bitData, 
                                uint64* bitSize) noexcept;
 DXGI_FORMAT GetDXGIFormat(const DDS_PIXELFORMAT& ddpf) noexcept;
-size_t BitsPerPixel(DXGI_FORMAT fmt) noexcept;
 
 unsigned char* dds_load_from_memory(uint8 const *buffer, int len, int *x, int *y, int *channels_in_file, int desired_channels) {
 
