@@ -135,10 +135,10 @@ bool32 renderer_create_pipeline() {
     //    RH_FATAL("Could not load default textures");
     //    return false;
     //}
-    //if (!resource_load_texture_debug_cube_map(&render_state->cube_tex)) {
-    //    RH_FATAL("Could not load default cubemap");
-    //    return false;
-    //}
+    if (!resource_load_texture_debug_cube_map(&render_state->cube_tex)) {
+        RH_FATAL("Could not load default cubemap");
+        return false;
+    }
 
     RH_TRACE("%.3lf ms to load default textures", measure_elapsed_time(last_time, &last_time)*1000.0f);
 
@@ -1192,14 +1192,12 @@ bool32 renderer_end_wireframe() {
 
 
 void renderer_create_texture(struct render_texture_2D* texture,
-                             texture_creation_info_2D create_info, 
-                             const void* data) {
-    backend->create_texture_2D(texture, create_info, data);
+                             texture_creation_info_2D create_info) {
+    backend->create_texture_2D(texture, create_info);
 }
 void renderer_create_texture_cube(struct render_texture_cube* texture,
-                                  texture_creation_info_cube create_info,
-                                  const void*** data, bool32 is_hdr, uint32 mip_levels) {
-    backend->create_texture_cube(texture, create_info, data, is_hdr, mip_levels);
+                                  texture_creation_info_cube create_info) {
+    backend->create_texture_cube(texture, create_info);
 }
 void renderer_destroy_texture(struct render_texture_2D* texture) {
     backend->destroy_texture_2D(texture);
@@ -1412,8 +1410,10 @@ void renderer_precompute_env_map_from_equirectangular(resource_env_map* env_map,
     texture_creation_info_2D info;
     info.width = env_map->src.width;
     info.height = env_map->src.height;
-    //info.num_channels = env_map->src.num_channels;
-    renderer_create_texture(&env_map->src.texture, info, data);
+    info.data = data;
+    info.format = TEXTURE_FORMAT_RGBA_FLOAT32;
+    info.mip_levels = 1;
+    renderer_create_texture(&env_map->src.texture, info);
 
     backend->use_shader(pConvert);
     backend->upload_uniform_float4x4(convert.r_Projection, cap_projection);

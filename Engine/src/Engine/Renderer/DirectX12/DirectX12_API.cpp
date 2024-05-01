@@ -998,8 +998,7 @@ void DirectX12_api::pop_debug_group() {
 }
 
 void DirectX12_api::create_texture_2D(struct render_texture_2D* texture, 
-                                   texture_creation_info_2D create_info, 
-                                   const void* data) {
+                                   texture_creation_info_2D create_info) {
     // first create the resource handle
     uint16 handle = dx12.textures.next_handle++;
     dx12.textures.num_alloced++;
@@ -1016,21 +1015,20 @@ void DirectX12_api::create_texture_2D(struct render_texture_2D* texture,
         &prop, D3D12_HEAP_FLAG_NONE,
         &desc, D3D12_RESOURCE_STATE_COMMON,
         nullptr, IID_PPV_ARGS(&_texture->gpu_resource));
+
     _texture->gpu_resource->SetName(L"texture.......");
 
+    uint32 mip_levels = 1;
+    uint64 uploadBufferSize = 0;
+    dx12.Device->GetCopyableFootprints(&desc, 0, mip_levels, 0, nullptr, nullptr, nullptr, &uploadBufferSize);
 
     // create upload_buffer in UPLOAD_HEAP
-    const uint64 uploadBufferSize = GetRequiredIntermediateSize(_texture->gpu_resource, 0, 1);
     prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     desc = CD3DX12_RESOURCE_DESC::Buffer(uploadBufferSize);
     dx12.Device->CreateCommittedResource(
         &prop, D3D12_HEAP_FLAG_NONE,
         &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
         nullptr, IID_PPV_ARGS(&_texture->gpu_upload_buffer));
-
-    //_texture->gpu_upload_buffer->Map(0, nullptr, (void**)&_texture->cpu_mapped);
-    //memory_copy(_texture->cpu_mapped, data, uploadBufferSize);
-    //_texture->gpu_upload_buffer->Unmap(0, nullptr);
 
     // schedule the copy from UPLOAD to DEFAULT
     dx12.frames[dx12.frame_idx].CommandAllocator->Reset();
@@ -1048,7 +1046,7 @@ void DirectX12_api::create_texture_2D(struct render_texture_2D* texture,
     uint64 numBytes = rowBytes * create_info.height;
 
     D3D12_SUBRESOURCE_DATA sub;
-    sub.pData      = data;
+    sub.pData      = create_info.data;
     sub.RowPitch   = rowBytes;
     sub.SlicePitch = numBytes;
 
@@ -1097,14 +1095,12 @@ void DirectX12_api::create_texture_2D(struct render_texture_2D* texture,
     texture->handle = handle;
 }
 void DirectX12_api::create_texture_cube(struct render_texture_cube* texture,
-                                     texture_creation_info_cube create_info, 
-                                     const void*** data, bool32 is_hdr, uint32 mip_levels) {
+                                     texture_creation_info_cube create_info) {
     texture->handle = 0;
 }
 
 void DirectX12_api::create_texture_3D(struct render_texture_3D* texture, 
-                                   texture_creation_info_3D create_info, 
-                                   const void* data) {
+                                   texture_creation_info_3D create_info) {
     texture->handle = 0;
 }
 

@@ -30,7 +30,9 @@ bool32 resource_load_shader_file(const char* resource_file_name,
 RHAPI bool32 resource_load_texture_file(const char* resource_file_name,
                                         resource_texture_2D* texture);
 
-// RHAPI bool32 resource_load_texture_debug_cube_map(resource_texture_cube* texture);
+RHAPI bool32 resource_load_texture_cube_map_from_files(const char* face_file_names[6],
+                                                       resource_texture_cube* texture);
+RHAPI bool32 resource_load_texture_debug_cube_map(resource_texture_cube* texture);
 
 //RHAPI bool32 resource_load_texture_cube_map_with_mips(const char* resource_file_base_name,
 //                                            resource_texture_cube* texture,

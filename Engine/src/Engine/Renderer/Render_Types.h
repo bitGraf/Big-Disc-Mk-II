@@ -124,6 +124,9 @@ struct texture_creation_info_2D {
     uint16 height;
 
     Texture_Format format;
+    uint16 mip_levels;
+
+    void* data;
 };
 
 struct render_texture_3D {
@@ -146,7 +149,9 @@ struct texture_creation_info_cube {
     uint16 height;
     
     Texture_Format format;
-    // filtering flags
+    uint16 mip_levels;
+
+    void* data[6];
 };
 
 struct render_material {
@@ -382,10 +387,9 @@ struct renderer_api {
     virtual void push_debug_group(const char* label) = 0;
     virtual void pop_debug_group() = 0;
 
-    virtual void create_texture_2D(struct   render_texture_2D*   texture, texture_creation_info_2D   create_info, const void*  data) = 0;
-    virtual void create_texture_3D(struct   render_texture_3D*   texture, texture_creation_info_3D   create_info, const void*  data) = 0;
-    virtual void create_texture_cube(struct render_texture_cube* texture, texture_creation_info_cube create_info, 
-                                     const void*** data, bool32 is_hdr, uint32 mip_levels) = 0;
+    virtual void create_texture_2D(struct   render_texture_2D*   texture, texture_creation_info_2D   create_info) = 0;
+    virtual void create_texture_3D(struct   render_texture_3D*   texture, texture_creation_info_3D   create_info) = 0;
+    virtual void create_texture_cube(struct render_texture_cube* texture, texture_creation_info_cube create_info) = 0;
 
     virtual void destroy_texture_2D(struct   render_texture_2D*   texture) = 0;
     virtual void destroy_texture_3D(struct   render_texture_3D*   texture) = 0;

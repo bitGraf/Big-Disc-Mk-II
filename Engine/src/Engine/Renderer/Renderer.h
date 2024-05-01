@@ -45,11 +45,9 @@ bool32 renderer_end_wireframe();
 // things like meshes, shaders, textures, etc.
 
 void renderer_create_texture(struct render_texture_2D* texture,
-                             texture_creation_info_2D create_info, 
-                             const void* data);
+                             texture_creation_info_2D create_info);
 void renderer_create_texture_cube(struct render_texture_cube* texture,
-                                  texture_creation_info_cube create_info, 
-                                  const void*** data, bool32 is_hdr, uint32 mip_levels = 1);
+                                  texture_creation_info_cube create_info);
 void renderer_precompute_env_map_from_equirectangular(struct resource_env_map* env_map, real32* data);
 
 void renderer_destroy_texture(struct render_texture_2D* texture);

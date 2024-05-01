@@ -343,8 +343,7 @@ GLenum GL_Type(Texture_Format tex_format) {
 }
 
 void OpenGL_api::create_texture_2D(struct render_texture_2D* texture, 
-                                   texture_creation_info_2D create_info, 
-                                   const void* data) {
+                                   texture_creation_info_2D create_info) {
     glGenTextures(1, &texture->handle);
     glBindTexture(GL_TEXTURE_2D, texture->handle);
 
@@ -352,7 +351,7 @@ void OpenGL_api::create_texture_2D(struct render_texture_2D* texture,
     GLenum Format = GL_Format(create_info.format);
     GLenum Type = GL_Type(create_info.format);
 
-    glTexImage2D(GL_TEXTURE_2D, 0, InternalFormat, create_info.width, create_info.height, 0, Format, Type, data);
+    glTexImage2D(GL_TEXTURE_2D, 0, InternalFormat, create_info.width, create_info.height, 0, Format, Type, create_info.data);
     glGenerateMipmap(GL_TEXTURE_2D);
 
     // This for font texture
@@ -365,8 +364,7 @@ void OpenGL_api::create_texture_2D(struct render_texture_2D* texture,
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 }
 void OpenGL_api::create_texture_cube(struct render_texture_cube* texture,
-                                     texture_creation_info_cube create_info, 
-                                     const void*** data, bool32 is_hdr, uint32 mip_levels) {
+                                     texture_creation_info_cube create_info) {
     glGenTextures(1, &texture->handle);
     glBindTexture(GL_TEXTURE_CUBE_MAP, texture->handle);
 
@@ -374,10 +372,10 @@ void OpenGL_api::create_texture_cube(struct render_texture_cube* texture,
     GLenum Format = GL_Format(create_info.format);
     GLenum Type = GL_Type(create_info.format);
 
-    bool32 has_mips = mip_levels > 1;
+    bool32 has_mips = create_info.mip_levels > 1;
 
     if (has_mips) {
-        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL , mip_levels-1);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAX_LEVEL , create_info.mip_levels-1);
         for (uint32 i = 0; i < 6; i++) {
             glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, InternalFormat, create_info.width, create_info.height, 0, Format, Type, NULL);
         }
@@ -385,11 +383,12 @@ void OpenGL_api::create_texture_cube(struct render_texture_cube* texture,
     }
 
     for (uint32 i = 0; i < 6; i++) {
-        for (uint32 mip = 0; mip < mip_levels; mip++) {
+        for (uint32 mip = 0; mip < create_info.mip_levels; mip++) {
             int32 mip_width  = (int32)((real32)(create_info.width)  * std::pow(0.5, mip));
             int32 mip_height = (int32)((real32)(create_info.height) * std::pow(0.5, mip));
 
-            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, mip, InternalFormat, mip_width, mip_height, 0, Format, Type, data[i][mip]);
+            //glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, mip, InternalFormat, mip_width, mip_height, 0, Format, Type, create_info.data[i][mip]);
+            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, mip, InternalFormat, mip_width, mip_height, 0, Format, Type, create_info.data[i]);
         }
     }
 
@@ -410,8 +409,7 @@ void OpenGL_api::create_texture_cube(struct render_texture_cube* texture,
 }
 
 void OpenGL_api::create_texture_3D(struct render_texture_3D* texture, 
-                                   texture_creation_info_3D create_info, 
-                                   const void* data) {
+                                   texture_creation_info_3D create_info) {
     RH_ERROR("OpenGL::create_texture_3D() not yet implemented!");
 }
 
