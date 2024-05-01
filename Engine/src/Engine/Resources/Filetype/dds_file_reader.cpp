@@ -4,14 +4,35 @@
 #include "Engine/Core/Asserts.h"
 #include "Engine/Platform/Platform.h"
 
+#ifndef HRESULT
+#define HRESULT int32
+#define SUCCEEDED(hr)  (((HRESULT)(hr)) >= 0)
+#define FAILED(hr)     (((HRESULT)(hr)) < 0)
+#define E_POINTER      ((HRESULT)0x80004003L)
+#define E_FAIL         ((HRESULT)0x80004005L)
+#define S_OK           ((HRESULT)0L)
+#endif
+
 //--------------------------------------------------------------------------------------
 // Macros
 //--------------------------------------------------------------------------------------
 #ifndef MAKEFOURCC
 #define MAKEFOURCC(ch0, ch1, ch2, ch3)                              \
-                  ((uint32_t)(uint8_t)(ch0) | ((uint32_t)(uint8_t)(ch1) << 8) |       \
-                  ((uint32_t)(uint8_t)(ch2) << 16) | ((uint32_t)(uint8_t)(ch3) << 24 ))
+((uint32_t)(uint8_t)(ch0) | ((uint32_t)(uint8_t)(ch1) << 8) |       \
+	((uint32_t)(uint8_t)(ch2) << 16) | ((uint32_t)(uint8_t)(ch3) << 24 ))
 #endif /* defined(MAKEFOURCC) */
+
+// HRESULT_FROM_WIN32(ERROR_ARITHMETIC_OVERFLOW)
+#define HRESULT_E_ARITHMETIC_OVERFLOW static_cast<HRESULT>(0x80070216L)
+
+// HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED)
+#define HRESULT_E_NOT_SUPPORTED static_cast<HRESULT>(0x80070032L)
+
+// HRESULT_FROM_WIN32(ERROR_HANDLE_EOF)
+#define HRESULT_E_HANDLE_EOF static_cast<HRESULT>(0x80070026L)
+
+// HRESULT_FROM_WIN32(ERROR_INVALID_DATA)
+#define HRESULT_E_INVALID_DATA static_cast<HRESULT>(0x8007000DL)
 
 //--------------------------------------------------------------------------------------
 // DDS file structure definitions
@@ -89,20 +110,26 @@ struct DDS_HEADER_DXT10 {
 
 #pragma pack(pop)
 
-bool LoadTextureDataFromMemory(const uint8* ddsData, uint64 ddsDataSize, 
-                               const DDS_HEADER** header, 
-                               const uint8** bitData, 
-                               uint64* bitSize) noexcept;
+HRESULT LoadTextureDataFromMemory(
+	uint8_t* ddsData,
+	size_t ddsDataSize,
+	const DDS_HEADER** header,
+	uint8_t** bitData,
+	size_t* bitSize) noexcept;
 DXGI_FORMAT GetDXGIFormat(const DDS_PIXELFORMAT& ddpf) noexcept;
 
-unsigned char* dds_load_from_memory(uint8 const *buffer, int len, int *x, int *y, int *channels_in_file, int desired_channels) {
+Texture_Format DX2TF(DXGI_FORMAT) noexcept;
+
+unsigned char* dds_load_from_memory(uint8 const *buffer, int buf_len, 
+                                    int *out_width, int *out_height, Texture_Format* out_format,
+                                    int32* out_is_cube, int32* out_mip_levels) {
 
     const DDS_HEADER* header = nullptr;
-    const uint8* bitData   = nullptr;
+    uint8* bitData   = nullptr;
     uint64 bitSize     = 0;
 
-    bool result = LoadTextureDataFromMemory(buffer, len, &header, &bitData, &bitSize);
-    if (!result) {
+    HRESULT hr = LoadTextureDataFromMemory(const_cast<uint8*>(buffer), buf_len, &header, &bitData, &bitSize);
+    if (FAILED(hr)) {
         RH_FATAL("Failed to parse data as .dds");
         return nullptr;
     }
@@ -188,60 +215,80 @@ unsigned char* dds_load_from_memory(uint8 const *buffer, int len, int *x, int *y
     //{
     //    *outIsCubeMap = isCubeMap;
     //}
+	*out_width = width;
+	*out_height = height;
+	*out_is_cube = (int32)isCubeMap;
+	*out_mip_levels = mipCount;
+	*out_format = DX2TF(format);
 
-    return nullptr;
+    return bitData;
 }
 
 
-bool LoadTextureDataFromMemory(const uint8* ddsData,
-                               uint64 ddsDataSize,
-                               const DDS_HEADER** header,
-                               const uint8** bitData,
-                               uint64* bitSize) noexcept {
-    // Check if there is enough data for a header
-    if (ddsDataSize > UINT32_MAX) {
-        return false;
-    }
+//--------------------------------------------------------------------------------------
+HRESULT LoadTextureDataFromMemory(
+	uint8_t* ddsData,
+	size_t ddsDataSize,
+	const DDS_HEADER** header,
+	uint8_t** bitData,
+	size_t* bitSize) noexcept
+{
+	if (!header || !bitData || !bitSize)
+	{
+		return E_POINTER;
+	}
 
-    if (ddsDataSize < (sizeof(uint32) + sizeof(DDS_HEADER))) {
-        return false;
-    }
+	*bitSize = 0;
 
-    // DDS files always start with the same magic number ("DDS ")
-    auto const dwMagicNumber = *reinterpret_cast<const uint32*>(ddsData);
-    if (dwMagicNumber != DDS_MAGIC) {
-        return false;
-    }
+	if (ddsDataSize > UINT32_MAX)
+	{
+		return E_FAIL;
+	}
 
-    auto hdr = reinterpret_cast<const DDS_HEADER*>(ddsData + sizeof(uint32));
+	if (ddsDataSize < (sizeof(uint32_t) + sizeof(DDS_HEADER)))
+	{
+		return E_FAIL;
+	}
 
-    // Verify header to validate DDS file
-    if (hdr->size != sizeof(DDS_HEADER) ||
-        hdr->ddspf.size != sizeof(DDS_PIXELFORMAT)) {
-        return false;
-    }
+	// DDS files always start with the same magic number ("DDS ")
+	auto const dwMagicNumber = *reinterpret_cast<const uint32_t*>(ddsData);
+	if (dwMagicNumber != DDS_MAGIC)
+	{
+		return E_FAIL;
+	}
 
-    // Check for DX10 extension
-    bool bDXT10Header = false;
-    if ((hdr->ddspf.flags & DDS_FOURCC) &&
-        (MAKEFOURCC('D', 'X', '1', '0') == hdr->ddspf.fourCC)) {
-        // Must be long enough for both headers and magic value
-        if (ddsDataSize < (sizeof(uint32) + sizeof(DDS_HEADER) + sizeof(DDS_HEADER_DXT10))) {
-            return false;
-        }
+	auto hdr = reinterpret_cast<const DDS_HEADER*>(ddsData + sizeof(uint32_t));
 
-        bDXT10Header = true;
-        RH_WARN("DX10 Not supported right now!");
-        return false;
-    }
+	// Verify header to validate DDS file
+	if (hdr->size != sizeof(DDS_HEADER) ||
+		hdr->ddspf.size != sizeof(DDS_PIXELFORMAT))
+	{
+		return E_FAIL;
+	}
 
-    // setup the pointers in the process request
-    *header = hdr;
-    auto offset = sizeof(uint32) + sizeof(DDS_HEADER) + (bDXT10Header ? sizeof(DDS_HEADER_DXT10) : 0u);
-    *bitData = ddsData + offset;
-    *bitSize = ddsDataSize - offset;
+	// Check for DX10 extension
+	bool bDXT10Header = false;
+	if ((hdr->ddspf.flags & DDS_FOURCC) &&
+		(MAKEFOURCC('D', 'X', '1', '0') == hdr->ddspf.fourCC))
+	{
+		// Must be long enough for both headers and magic value
+		if (ddsDataSize < (sizeof(uint32_t) + sizeof(DDS_HEADER) + sizeof(DDS_HEADER_DXT10)))
+		{
+			return E_FAIL;
+		}
 
-    return true;
+		bDXT10Header = true;
+	}
+
+	// setup the pointers in the process request
+	*header = hdr;
+	auto offset = sizeof(uint32_t)
+	+ sizeof(DDS_HEADER)
+	+ (bDXT10Header ? sizeof(DDS_HEADER_DXT10) : 0u);
+	*bitData = ddsData + offset;
+	*bitSize = ddsDataSize - offset;
+
+	return S_OK;
 }
 
 
@@ -675,4 +722,41 @@ size_t BitsPerPixel(DXGI_FORMAT fmt) noexcept
         default:
             return 0;
     }
+}
+
+Texture_Format DX2TF(DXGI_FORMAT dx_format) noexcept {
+	Texture_Format format = TEXTURE_FORMAT_UNKNOWN;
+	switch (dx_format) {
+		case DXGI_FORMAT_UNKNOWN: 					{format = TEXTURE_FORMAT_UNKNOWN; } break;
+		case DXGI_FORMAT_R32G32B32A32_FLOAT:		{format = TEXTURE_FORMAT_RGBA_FLOAT32; } break;
+		case DXGI_FORMAT_R32G32B32_FLOAT:			{format = TEXTURE_FORMAT_RGB_FLOAT32; } break;
+		case DXGI_FORMAT_R16G16B16A16_FLOAT:		{format = TEXTURE_FORMAT_RGBA_FLOAT16; } break;
+		case DXGI_FORMAT_R32G32_FLOAT:    			{format = TEXTURE_FORMAT_RG_FLOAT32; } break;
+		case DXGI_FORMAT_R8G8B8A8_UNORM: 			{format = TEXTURE_FORMAT_RGBA_U8_NORM; } break;
+		case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: 		{format = TEXTURE_FORMAT_RGBA_U8_NORM_SRGB; } break;
+		case DXGI_FORMAT_R16G16_FLOAT: 				{format = TEXTURE_FORMAT_RG_FLOAT16; } break;
+		case DXGI_FORMAT_R16G16_UNORM: 				{format = TEXTURE_FORMAT_RG_U16_NORM; } break;
+		case DXGI_FORMAT_D32_FLOAT: 				{format = TEXTURE_FORMAT_DEPTH_32F; } break;
+		case DXGI_FORMAT_R32_FLOAT: 				{format = TEXTURE_FORMAT_R_FLOAT32; } break;
+		case DXGI_FORMAT_D24_UNORM_S8_UINT: 		{format = TEXTURE_FORMAT_DEPTH_24F_STENCIL_U8; } break;
+		case DXGI_FORMAT_R8G8_UNORM: 				{format = TEXTURE_FORMAT_RG_U8_NORM; } break;
+		case DXGI_FORMAT_R16_FLOAT: 				{format = TEXTURE_FORMAT_R_FLOAT16; } break;
+		case DXGI_FORMAT_D16_UNORM: 				{format = TEXTURE_FORMAT_DEPTH_16F; } break;
+		case DXGI_FORMAT_R16_UNORM: 				{format = TEXTURE_FORMAT_R_U16_NORM; } break;
+		case DXGI_FORMAT_R8_UNORM:					{format = TEXTURE_FORMAT_R_U8_NORM; } break;
+		case DXGI_FORMAT_BC1_UNORM: 				{format = TEXTURE_FORMAT_BC1_UNORM; } break;
+		case DXGI_FORMAT_BC1_UNORM_SRGB:			{format = TEXTURE_FORMAT_BC1_UNORM_SRGB; } break;
+		case DXGI_FORMAT_BC2_UNORM: 				{format = TEXTURE_FORMAT_BC2_UNORM; } break;
+		case DXGI_FORMAT_BC2_UNORM_SRGB: 			{format = TEXTURE_FORMAT_BC2_UNORM_SRGB; } break;
+		case DXGI_FORMAT_BC3_UNORM:					{format = TEXTURE_FORMAT_BC3_UNORM; } break;
+		case DXGI_FORMAT_BC3_UNORM_SRGB: 			{format = TEXTURE_FORMAT_BC3_UNORM_SRGB; } break;
+		case DXGI_FORMAT_BC4_UNORM: 				{format = TEXTURE_FORMAT_BC4_UNORM; } break;
+		case DXGI_FORMAT_BC4_SNORM: 				{format = TEXTURE_FORMAT_BC4_SNORM; } break;
+		case DXGI_FORMAT_BC5_UNORM:  				{format = TEXTURE_FORMAT_BC5_UNORM; } break;
+		case DXGI_FORMAT_BC5_SNORM:  				{format = TEXTURE_FORMAT_BC5_SNORM; } break;
+		case DXGI_FORMAT_BC7_UNORM:      	  		{format = TEXTURE_FORMAT_BC7_UNORM; } break;
+		case DXGI_FORMAT_BC7_UNORM_SRGB: 	  		{format = TEXTURE_FORMAT_BC7_UNORM_SRGB; } break;
+	}
+
+	return format;
 }

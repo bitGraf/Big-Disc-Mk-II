@@ -182,14 +182,14 @@ bool32 DirectX12_api::initialize(const char* application_name,
     }
 
     // Find adapter with the highest vram
-    ComPtr<IDXGIAdapter1> adapter;
+    ComPtr<IDXGIAdapter3> adapter;
     uint32 max_idx = 0;
     uint64 max_vram = 0;
     {
         RH_INFO("------ Display Adapters ------------------------");
 
         uint32 i = 0;
-        while (factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND) {
+        while (factory->EnumAdapters1(i, reinterpret_cast<IDXGIAdapter1**>(adapter.GetAddressOf())) != DXGI_ERROR_NOT_FOUND) {
             DXGI_ADAPTER_DESC1 desc;
             adapter->GetDesc1(&desc);
 
@@ -203,7 +203,7 @@ bool32 DirectX12_api::initialize(const char* application_name,
         }
 
         // get the best choice now
-        if (factory->EnumAdapters1(max_idx, &adapter) == DXGI_ERROR_NOT_FOUND) {
+        if (factory->EnumAdapters1(max_idx, reinterpret_cast<IDXGIAdapter1**>(adapter.GetAddressOf())) == DXGI_ERROR_NOT_FOUND) {
             RH_FATAL("could not find the best Device...\n");
             return false;
         }
@@ -652,6 +652,8 @@ bool32 DirectX12_api::initialize(const char* application_name,
     dx12.shaders.total_capacity = num_reserve;
     dx12.shaders.shaders = PushArray(dx12.backend_arena, DX12State::_Shader, num_reserve);
     memory_zero(dx12.shaders.shaders, num_reserve*sizeof(DX12State::_Shader));
+
+	// check usage
 
     return true;
 }

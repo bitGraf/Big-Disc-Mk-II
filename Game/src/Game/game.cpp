@@ -54,15 +54,6 @@ void init_game(game_state* state, game_memory* memory) {
 
     memory_arena* arena = resource_get_arena();
 
-    int x,y,n;
-    unsigned char *bitmap = dds_load_from_memory(file.data, (int)file.num_bytes, &x, &y, &n, 0);
-    platform_free_file_data(&file);
-    if (bitmap == NULL) {
-        RH_ERROR("Failed to load image file!");
-        //return;
-    }
-    //
-
     memory_index offset = sizeof(game_state);
     CreateArena(&state->arena, memory->GameStorageSize-offset, (uint8*)(memory->GameStorage)+offset);
 
@@ -95,6 +86,11 @@ void init_game(game_state* state, game_memory* memory) {
     mesh->materials[0].DiffuseFactor = laml::Vec3(0.4f, 1.0f, 0.4f);
     entity_static* floor = create_static_entity(&state->scene, "floor", mesh);
     floor->color = laml::Vec3(1.0f);
+
+	resource_texture_2D dds_tex;
+	if (!resource_load_texture_file("Data/textures/metal.dds", &dds_tex)) {
+		RH_ERROR("Failed to load dds.");
+	}
 
     resource_static_mesh* mesh2 = PushStruct(&state->arena, resource_static_mesh);
     resource_load_static_mesh("Data/Models/box.mesh", mesh2);

@@ -201,7 +201,8 @@ void platform_init_logging(bool32 create_console) {
     //       i.e.: if you run from command line by typing game.exe for example,
     //       the console does not move. This is how i want it!
     HWND console_window = GetConsoleWindow();
-    SetWindowPos(console_window, HWND_TOP, 900, 17, 1003, 1000, 0);
+    //SetWindowPos(console_window, HWND_TOP, 900, 17, 1003, 1000, 0);
+	SetWindowPos(console_window, HWND_TOP, 850, 17, 700, 700, 0);
     #endif
 }
 bool32 platform_startup(AppConfig* config) {

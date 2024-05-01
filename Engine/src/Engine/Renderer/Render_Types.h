@@ -125,6 +125,7 @@ struct texture_creation_info_2D {
 
     Texture_Format format;
     uint16 mip_levels;
+	uint16 is_cube;
 
     void* data;
 };

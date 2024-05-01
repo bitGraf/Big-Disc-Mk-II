@@ -9,6 +9,7 @@
 
 #include "Engine/Memory/Memory_Arena.h"
 
+#include "Engine/Resources/Filetype/dds_file_reader.h"
 #include <stb/stb_image.h>
 #include <stb/stb_image_write.h>
 
@@ -34,15 +35,24 @@ bool32 resource_load_texture_file(const char* resource_file_name,
 
     Texture_Format format = TEXTURE_FORMAT_UNKNOWN;
     int width,height;
+	int is_cube, mip_levels;
     void* data = nullptr;
     bool stbi = false;
 
     if (string_compare(ext, ".dds") == 0) {
-        width = 0;
-        height = 0;
-        data = 0;
+		uint8* bitdata = dds_load_from_memory(file.data, (int)file.num_bytes, 
+		                                      &width, &height, &format,
+		                                      &is_cube, &mip_levels);
+
+		if (bitdata == nullptr || format == TEXTURE_FORMAT_UNKNOWN) {
+			RH_ERROR("Failed to load image file!");
+            return false;
+		}
+		data = bitdata;
     } else {
         stbi = true; // to cleanup
+		is_cube = 0;
+        mip_levels = 1;
 
         int num_channels = 0;
         stbi_set_flip_vertically_on_load(true);
@@ -88,12 +98,13 @@ bool32 resource_load_texture_file(const char* resource_file_name,
 
     AssertMsg(format != TEXTURE_FORMAT_UNKNOWN, "Could not determine the format!");
 
-    texture_creation_info_2D info;
+	texture_creation_info_2D info;
     info.width  = static_cast<uint16>(width);
     info.height = static_cast<uint16>(height);
     info.format = format;
     info.data = data;
-    info.mip_levels = 1;
+    info.mip_levels = (uint16)mip_levels;
+	info.is_cube = (uint16)is_cube;
     renderer_create_texture(&texture->texture, info);
 
     platform_free_file_data(&file);
