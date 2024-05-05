@@ -139,10 +139,6 @@ struct DX12State {
     };
     _Shader_Storage shaders;
 
-    struct _Framebuffer {
-
-    };
-
     uint32 recording = 0;
 };
 global_variable DX12State dx12;
@@ -654,6 +650,7 @@ bool32 DirectX12_api::initialize(const char* application_name,
     memory_zero(dx12.shaders.shaders, num_reserve*sizeof(DX12State::_Shader));
 
 	// check usage
+	//adapter->QueryVideoMemoryInfo(
 
     return true;
 }
@@ -1008,11 +1005,10 @@ void DirectX12_api::create_texture_2D(struct render_texture_2D* texture,
     DX12State::_Resource* _texture = &dx12.textures.resources[handle];
 
     DXGI_FORMAT format = static_cast<DXGI_FORMAT>(create_info.format);
-    const uint64 bytes_per_pixel = (BitsPerPixel(format) + 7u) / 8u;
 
-    // create resource in DEFAULT_HEAP
+    // create resource in DEFAULT_HEAP    
     auto prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    auto desc = CD3DX12_RESOURCE_DESC::Tex2D(format, create_info.width, create_info.height);
+    auto desc = CD3DX12_RESOURCE_DESC::Tex2D(format, create_info.width, create_info.height, 1, create_info.mip_levels);
     dx12.Device->CreateCommittedResource(
         &prop, D3D12_HEAP_FLAG_NONE,
         &desc, D3D12_RESOURCE_STATE_COMMON,
@@ -1020,9 +1016,8 @@ void DirectX12_api::create_texture_2D(struct render_texture_2D* texture,
 
     _texture->gpu_resource->SetName(L"texture.......");
 
-    uint32 mip_levels = 1;
     uint64 uploadBufferSize = 0;
-    dx12.Device->GetCopyableFootprints(&desc, 0, mip_levels, 0, nullptr, nullptr, nullptr, &uploadBufferSize);
+    dx12.Device->GetCopyableFootprints(&desc, 0, create_info.mip_levels, 0, nullptr, nullptr, nullptr, &uploadBufferSize);
 
     // create upload_buffer in UPLOAD_HEAP
     prop = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
@@ -1044,21 +1039,48 @@ void DirectX12_api::create_texture_2D(struct render_texture_2D* texture,
                                                                           D3D12_RESOURCE_STATE_COPY_DEST);
     dx12.CmdList->ResourceBarrier(1, &barrier);
 
-    uint64 rowBytes = uint64(create_info.width) * bytes_per_pixel;
-    uint64 numBytes = rowBytes * create_info.height;
+	// create subresources, 1 per mip-level
+	uint16 num_subresources = create_info.mip_levels;
+	D3D12_SUBRESOURCE_DATA subresources[32]; // no texture will have this many mip-levels...
 
-    D3D12_SUBRESOURCE_DATA sub;
-    sub.pData      = create_info.data;
-    sub.RowPitch   = rowBytes;
-    sub.SlicePitch = numBytes;
+	const uint64 bits_per_pixel = BitsPerPixel(format);
+	uint64 mip_width  = create_info.width;
+	uint64 mip_height = create_info.height;
+	uint8* offset = (uint8*)create_info.data;
+	for (uint16 n = 0; n < num_subresources; n++) {
+		AssertMsg(mip_width  != 0, "Mip width is zero!");
+		AssertMsg(mip_height != 0, "Mip height is zero!");
+		uint64 rowBytes = (mip_width * bits_per_pixel + 7u) / 8u;
+		uint64 numBytes = rowBytes * mip_height;
+
+		// check if its block compressed!
+        if (format == DXGI_FORMAT_BC1_UNORM) {
+            rowBytes *= 4;
+            //numBytes /= 2;
+        }
+
+        subresources[n].pData = offset;
+        subresources[n].RowPitch = rowBytes;
+        subresources[n].SlicePitch = numBytes;
+
+		// for next mip level...
+		offset += numBytes;
+		mip_width  /= 2;
+		mip_height /= 2;
+
+		//if (mip_width < 4 || mip_height < 4) {
+		//	num_subresources = n+1;
+		//	break;
+		//}
+	}
 
     if (0 == UpdateSubresources(dx12.CmdList.Get(),           // cmdList
                                 _texture->gpu_resource,       // Destination
                                 _texture->gpu_upload_buffer,  // Intermediate
                                 0,                            // IntermediateOffset
                                 0,                            // FirstSubresource
-                                1,                            // NumSubresources
-                                &sub))                        // Subresources
+                                num_subresources,             // NumSubresources
+                                subresources))               // Subresources
     {
         RH_ERROR("Failed on UpdateSubresources");
     }
@@ -1088,7 +1110,7 @@ void DirectX12_api::create_texture_2D(struct render_texture_2D* texture,
     srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 
     srv_desc.Texture2D.MostDetailedMip = 0;
-    srv_desc.Texture2D.MipLevels = 1;
+    srv_desc.Texture2D.MipLevels = num_subresources;
     srv_desc.Texture2D.PlaneSlice = 0;
     srv_desc.Texture2D.ResourceMinLODClamp = 0.0;
 

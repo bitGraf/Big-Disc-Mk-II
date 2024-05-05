@@ -17,11 +17,13 @@ int main(int argc, char** argv) {
 
     if (!create_application(&app)) {
         RH_FATAL("Could not create application!");
+		platform_sleep(2500);
         return -1;
     }
 
     if (!app.update_and_render || !app.initialize || !app.on_resize) {
         RH_FATAL("Application function pointers not setup!");
+		platform_sleep(2500);
         return -2;
     }
 
