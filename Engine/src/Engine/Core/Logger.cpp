@@ -54,7 +54,7 @@ void LogOutput(log_level Level, const char* Message, ...) {
     if (Level <= max_log_level) {
         bool32 IsError = Level < LOG_LEVEL_WARN;
 
-        char MsgBuffer[1024] = { 0 };
+        char MsgBuffer[4096] = { 0 };
 
         int offset = snprintf(MsgBuffer, sizeof(MsgBuffer), "%s", LevelStings[Level]);
 

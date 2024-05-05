@@ -26,12 +26,25 @@
 
 #define SIMPLE_RENDER_PASS 1
 
-struct simple_per_pass_constants {
+// Simple.hlsl
+struct standard_per_pass_constants {
     laml::Mat4 proj_view;
 };
-struct simple_per_object_constants {
+struct standard_per_object_constants {
     laml::Mat4 r_Transform;
     laml::Vec3 u_color;
+};
+
+// Skybox.hlsl
+struct skybox_per_pass_constants {
+    laml::Mat4 r_View;
+    laml::Mat4 r_Projection;
+
+    uint32 r_ToneMap;
+    uint32 r_GammaCorrect;
+};
+struct skybox_per_object_constants {
+    uint32 _placeholder;
 };
 
 struct renderer_state {
@@ -46,8 +59,10 @@ struct renderer_state {
     // simple render pass
     //shader simple_shader;
     shader_simple simple_shader;
+    shader_Skybox skybox_shader;
 
-    render_pass simple_pass;
+    render_pass standard_pass;  // uses simple.hlsl, fills stencil buffer
+    render_pass skybox_pass;    // uses skybox.hlsl, only draws where stencil is 0
 #else
     // deferred pbr render pass
     shader_PrePass      static_pre_pass_shader;
@@ -67,9 +82,9 @@ struct renderer_state {
 
     frame_buffer BRDF_LUT;
     shader_BRDF_Integrate brdf_integrate_shader;
-#endif
 
     shader_Skybox skybox_shader;
+#endif
 
     int32 visualize_maps;
     int32 map_to_visualise; // unused
@@ -233,14 +248,32 @@ bool32 renderer_create_pipeline() {
         RH_FATAL("Could not setup the main shader");
         return false;
     }
-    backend->create_render_pass(&render_state->simple_pass, pSimple, 
-                                sizeof(simple_per_pass_constants), 
-                                sizeof(simple_per_object_constants));
-
+    //backend->enable_stencil_test();
+    //backend->set_stencil_mask(0xFF);
+    //backend->set_stencil_func(render_stencil_func::Always, 100, 0xFF);
+    //backend->set_stencil_op(render_stencil_op::Keep, render_stencil_op::Keep, render_stencil_op::Replace);
+    backend->create_render_pass(&render_state->standard_pass, pSimple, 
+                                sizeof(standard_per_pass_constants), 
+                                sizeof(standard_per_object_constants));
     backend->use_shader(pSimple);
-
     simple.InitShaderLocs();
     backend->upload_uniform_int(simple.u_texture, simple.u_texture.SamplerID);
+
+    //backend->enable_stencil_test();
+    //backend->set_stencil_mask(0xFF);
+    //backend->set_stencil_func(render_stencil_func::NotEqual, 100, 0xFF);
+    //backend->set_stencil_op(render_stencil_op::Keep, render_stencil_op::Keep, render_stencil_op::Keep);
+    shader* pSkybox = (shader*)(&render_state->skybox_shader);
+    if (!resource_load_shader_file("Data/Shaders/Skybox.glsl", pSkybox)) {
+        RH_FATAL("Could not setup the skybox shader");
+        return false;
+    }
+    backend->create_render_pass(&render_state->skybox_pass, pSkybox, 
+                                sizeof(skybox_per_pass_constants), 
+                                sizeof(skybox_per_object_constants));
+    backend->use_shader(pSkybox);
+    render_state->skybox_shader.InitShaderLocs();
+    backend->upload_uniform_int(render_state->skybox_shader.u_skybox, render_state->skybox_shader.u_skybox.SamplerID);
 
     backend->pop_debug_group(); // Create simple pipeline
     RH_TRACE("%.3lf ms to create Simple Render Pipeline", measure_elapsed_time(simple_pipeline_start)*1000.0f);
@@ -452,15 +485,6 @@ bool32 renderer_create_pipeline() {
     RH_TRACE("%.3lf ms to Create PBR Pipeline", measure_elapsed_time(pbr_pipeline_start)*1000.0f);
 
 #endif
-    // setup skybox shader
-    shader *pSkybox = (shader*)(&render_state->skybox_shader);
-    //if (!resource_load_shader_file("Data/Shaders/Skybox.glsl", pSkybox)) {
-    //    RH_FATAL("Could not setup the skybox shader");
-    //    return false;
-    //}
-    backend->use_shader(pSkybox);
-    render_state->skybox_shader.InitShaderLocs();
-    backend->upload_uniform_int(render_state->skybox_shader.u_skybox, render_state->skybox_shader.u_skybox.SamplerID);
 
     // setup wireframe shader
     //if (!resource_load_shader_file("Data/Shaders/wireframe.glsl", &render_state->wireframe_shader)) {
@@ -583,7 +607,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
 
         backend->set_viewport(0, 0, render_state->render_width, render_state->render_height);
 
-        backend->begin_render_pass(&render_state->simple_pass);
+        backend->begin_render_pass(&render_state->standard_pass);
 
         //shader* pSimple = (shader*)(&render_state->simple_shader);
         //backend->use_shader(pSimple);
@@ -593,7 +617,7 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         //laml::Vec3 color(1.0f, 1.0f, 1.0f);
         //backend->upload_uniform_float3(simple.u_color, color);
 
-        simple_per_pass_constants* per_frame = (simple_per_pass_constants*)render_state->simple_pass.per_frame;
+        standard_per_pass_constants* per_frame = (standard_per_pass_constants*)render_state->standard_pass.per_frame;
         per_frame->proj_view = laml::mul(packet->projection_matrix, packet->view_matrix);
 
         // draw world axis
@@ -605,12 +629,14 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         //backend->set_stencil_mask(0xFF);
         //backend->set_stencil_func(render_stencil_func::Always, 100, 0xFF);
         //backend->set_stencil_op(render_stencil_op::Keep, render_stencil_op::Keep, render_stencil_op::Replace);
+        uint32 draw_call_idx = 0;
         for (uint32 cmd_index = 0; cmd_index < packet->num_commands; cmd_index++) {
             render_command& cmd = packet->commands[cmd_index];
             render_material& mat = cmd.material;
 
-            backend->start_draw_call(&render_state->simple_pass, cmd_index);
-            simple_per_object_constants* per_object = (simple_per_object_constants*)render_state->simple_pass.per_object;
+            draw_call_idx = cmd_index;
+            backend->start_draw_call(&render_state->standard_pass, draw_call_idx);
+            standard_per_object_constants* per_object = (standard_per_object_constants*)render_state->standard_pass.per_object;
 
             per_object->r_Transform = cmd.model_matrix;
             per_object->u_color     = mat.DiffuseFactor;
@@ -631,12 +657,34 @@ bool32 renderer_draw_frame(render_packet* packet, bool32 debug_mode) {
         //backend->set_stencil_func(render_stencil_func::NotEqual, 100, 0xFF);
         //backend->set_stencil_op(render_stencil_op::Keep, render_stencil_op::Keep, render_stencil_op::Keep);
 
-        backend->end_render_pass(&render_state->simple_pass);
+        backend->end_render_pass(&render_state->standard_pass);
 
         //backend->clear_viewport_only_color(0, 0, 0, 0);
 
         // Draw Skybox
         #if 0
+
+        backend->begin_render_pass(&render_state->skybox_pass);
+        skybox_per_pass_constants* per_frame = (skybox_per_pass_constants*)render_state->skybox_pass.per_frame;
+        per_frame->r_View       = packet->view_matrix;
+        per_frame->r_Projection = packet->projection_matrix;
+        per_frame->r_ToneMap = 0;
+        per_frame->r_GammaCorrect = 0;
+
+        draw_call_idx++;
+        backend->start_draw_call(&render_state->skybox_pass, draw_call_idx);
+
+        //skybox_per_object_constants* per_object = (skybox_per_object_constants*)render_state->standard_pass.per_object;
+        backend->bind_texture_cube(render_state->cube_tex.texture, 0);
+        backend->bind_geometry(&render_state->cube_geom);
+        backend->draw_indexed(render_state->cube_geom.num_inds, 0, 0);
+
+        backend->end_render_pass(&render_state->skybox_pass);
+
+
+
+
+
         shader* pSkybox = (shader*)(&render_state->skybox_shader);
         backend->use_shader(pSkybox);
         laml::Mat4 skybox_view;

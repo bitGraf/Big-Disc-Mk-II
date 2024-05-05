@@ -827,6 +827,8 @@ bool32 DirectX12_api::begin_frame(real32 delta_time) {
         dx12.CmdList->OMSetRenderTargets(1, &rtv, true, &dsv);
     }
 
+    dx12.CmdList->OMSetStencilRef(1);
+
     dx12.recording = true;
 
     return true;
@@ -1477,7 +1479,7 @@ void DirectX12_api::create_render_pass(render_pass* pass, shader* pass_shader,
 
         // Per Frame Buffer
         root_parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-        root_parameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+        root_parameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
         root_parameters[2].Descriptor.ShaderRegister = 2;
         root_parameters[2].Descriptor.RegisterSpace  = 0;
 
@@ -1542,11 +1544,29 @@ void DirectX12_api::create_render_pass(render_pass* pass, shader* pass_shader,
         desc.PS.BytecodeLength  = _shader->ps_bytecode->GetBufferSize();
 
         desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+
         desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT); 
+        desc.DepthStencilState.DepthEnable = true;
+        desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+        desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+        desc.DepthStencilState.StencilEnable = true;
+        desc.DepthStencilState.StencilReadMask = 0xFF;
+        desc.DepthStencilState.StencilWriteMask = 0xFF;
+        desc.DepthStencilState.BackFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
+        desc.DepthStencilState.BackFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
+        desc.DepthStencilState.BackFace.StencilPassOp = D3D12_STENCIL_OP_REPLACE;
+        desc.DepthStencilState.BackFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+        desc.DepthStencilState.FrontFace.StencilFailOp = D3D12_STENCIL_OP_KEEP;
+        desc.DepthStencilState.FrontFace.StencilDepthFailOp = D3D12_STENCIL_OP_KEEP;
+        desc.DepthStencilState.FrontFace.StencilPassOp = D3D12_STENCIL_OP_KEEP;
+        desc.DepthStencilState.FrontFace.StencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
 
         desc.SampleMask = UINT_MAX;
         desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-        desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+        // OpenGL  defines front as CCW
+        // DirectX defines front as CW
+        desc.RasterizerState.CullMode = D3D12_CULL_MODE_FRONT;
+
         desc.InputLayout.pInputElementDescs = vert_desc;
         desc.InputLayout.NumElements = 5;
         desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
